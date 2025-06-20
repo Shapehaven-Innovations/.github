@@ -36,7 +36,7 @@ Welcome to ShapeHaven Innovations — where boundary-pushing design meets rock-s
 | Repo       | Status    | Description                            |
 | ---------- | --------- | -------------------------------------- |
 | `mDNSShark` | 🚧 Alpha  | A Bonjour servuce identifier that scans local network services using Apples Bonjour Protocol  |
-| `IntervalTimer(x)`  | ✨ Release  | Privacy First HIIT designed to help users manager and track timed activites with collecting personal data|
+| `IntervalTimer(x)`  | ✨ Release  | Privacy First HIIT designed to help users manager and track timed activites without collecting personal data|
 | `WordFlora`  | 🧪 Lab    | Word guessing hame inspired by classic hangman  but with a botantical twist  |
 
 > Dive into `/projects` for the full portfolio.
