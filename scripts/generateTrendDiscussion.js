@@ -35,7 +35,7 @@
         { role: "system", content: "You are a tech trends reporter." },
         {
           role: "user",
-          content: `What are the top tech trends for the week of ${weekOf}?`,
+          content: `What are the top tech trends for the week of ${weekOf}?, provide detailed insights and examples. Format as a discussion post.`,
         },
       ],
       max_tokens: 500,
