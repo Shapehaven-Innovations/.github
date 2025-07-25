@@ -1,33 +1,35 @@
 name: Bi‑Weekly Org Tech Trends
 
 on:
-  # manual trigger
+  # Manual dispatch for testing
   workflow_dispatch:
-  # scheduled trigger
+  # Bi‑weekly schedule (1st & 15th at 09:00 UTC)
   schedule:
     - cron: '0 9 1,15 * *'
-
 
 jobs:
   post-tech-trends:
     runs-on: ubuntu-latest
     steps:
+      # 1. Checkout the repo (<org>/.github)
       - uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository }}   # checks out <ORG>/.github
 
+      # 2. Use Node 18
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
 
+      # 3. Install only the Octokit request library
       - name: Install dependencies
-        run: npm install @octokit/request node-fetch
+        run: npm install @octokit/request
 
+      # 4. Run your CommonJS script
       - name: Generate & Post Org Discussion
-        env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          DISCUSSION_CATEGORY_ID: ${{ secrets.DISCUSSION_CATEGORY_ID }}
         run: node scripts/generateTrendDiscussion.js
+        env:
+          GITHUB_REPOSITORY:      ${{ github.repository }}
+          GITHUB_TOKEN:           ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY:         ${{ secrets.OPENAI_API_KEY }}
+          DISCUSSION_CATEGORY_ID: ${{ secrets.DISCUSSION_CATEGORY_ID }}
+          

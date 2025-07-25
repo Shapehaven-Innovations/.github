@@ -1,6 +1,6 @@
-// .github/scripts/generateTrendDiscussion.js
-import { request } from "@octokit/request";
-import fetch from "node-fetch";
+// scripts/generateTrendDiscussion.js
+
+const { request } = require("@octokit/request");
 
 async function run() {
   const {
@@ -10,7 +10,7 @@ async function run() {
     DISCUSSION_CATEGORY_ID,
   } = process.env;
 
-  // Derive org from the repo (e.g. "my-org/.github")
+  // Derive org from "org/.github"
   const org = GITHUB_REPOSITORY.split("/")[0];
 
   // 1. Ask ChatGPT for this week’s trends
@@ -35,7 +35,7 @@ async function run() {
   const { choices } = await chatRes.json();
   const content = choices[0].message.content.trim();
 
-  // 2. Create an **organization discussion**
+  // 2. Create the Org‐level Discussion
   await request("POST /orgs/{org}/discussions", {
     org,
     category_id: DISCUSSION_CATEGORY_ID,
