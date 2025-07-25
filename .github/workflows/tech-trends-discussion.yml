@@ -1,9 +1,12 @@
 name: Bi‑Weekly Org Tech Trends
 
 on:
+  # manual trigger
+  workflow_dispatch:
+  # scheduled trigger
   schedule:
-    # Runs at 09:00 UTC on the 1st and 15th of every month
     - cron: '0 9 1,15 * *'
+
 
 jobs:
   post-tech-trends:
