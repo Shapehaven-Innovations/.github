@@ -16,8 +16,8 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Install deps
-        run: npm install
+      - name: Install Octokit Request only
+        run:  npm install @octokit/request
 
       - name: Generate & Post Discussion
         run: node scripts/generateTrendDiscussion.js
