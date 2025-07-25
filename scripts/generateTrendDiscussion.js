@@ -1,70 +1,90 @@
 // scripts/generateTrendDiscussion.js
-
 (async () => {
-  // Dynamically import the ESM-only @octokit/request
-  const { request } = await import("@octokit/request");
+  const {
+    OPENAI_API_KEY,
+    GITHUB_TOKEN,
+    DISCUSSION_CATEGORY_ID,
+    GITHUB_REPOSITORY,
+  } = process.env;
 
-  // Main
-  async function run() {
-    const {
-      GITHUB_REPOSITORY,
-      OPENAI_API_KEY,
-      GITHUB_TOKEN,
-      DISCUSSION_CATEGORY_ID,
-    } = process.env;
+  // Derive repo-owner and repo-name ("<ORG>/.github")
+  const [owner, repo] = GITHUB_REPOSITORY.split("/");
 
-    // Extract org name from "org/.github"
-    const org = GITHUB_REPOSITORY.split("/")[0];
+  // 1️⃣ Fetch this week’s trends from OpenAI
+  const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { role: "system", content: "You’re a tech trends reporter." },
+        {
+          role: "user",
+          content: `What are the top tech trends for the week of ${new Date().toLocaleDateString()}?`,
+        },
+      ],
+      temperature: 0.7,
+    }),
+  });
+  if (!openaiRes.ok) throw new Error(`OpenAI API error: ${openaiRes.status}`);
+  const { choices } = await openaiRes.json();
+  const body = choices[0].message.content.trim();
 
-    // 1️⃣ Ask ChatGPT for the week’s trends
-    const chatRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+  // 2️⃣ Look up the repository’s node ID via GraphQL
+  const lookupRes = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${GITHUB_TOKEN}`,
+    },
+    body: JSON.stringify({
+      query: `
+        query RepoId($owner:String!, $repo:String!) {
+          repository(owner:$owner, name:$repo) { id }
+        }
+      `,
+      variables: { owner, repo },
+    }),
+  });
+  const lookupJson = await lookupRes.json();
+  const repositoryId = lookupJson.data.repository.id;
+
+  // 3️⃣ Create the discussion via GraphQL createDiscussion mutation
+  const createRes = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${GITHUB_TOKEN}`,
+    },
+    body: JSON.stringify({
+      query: `
+        mutation CreateDiscussion($input: CreateDiscussionInput!) {
+          createDiscussion(input: $input) {
+            discussion { id }
+          }
+        }
+      `,
+      variables: {
+        input: {
+          repositoryId,
+          categoryId: DISCUSSION_CATEGORY_ID,
+          title: `Tech Trends – Week of ${new Date().toLocaleDateString()}`,
+          body,
+        },
       },
-      body: JSON.stringify({
-        model: "gpt-3.5-turbo",
-        messages: [
-          { role: "system", content: "You’re a tech trends reporter." },
-          {
-            role: "user",
-            content: `What are the top tech trends for the week of ${new Date().toLocaleDateString()}?`,
-          },
-        ],
-        temperature: 0.7,
-      }),
-    });
-
-    if (!chatRes.ok) {
-      throw new Error(
-        `OpenAI API error: ${chatRes.status} ${chatRes.statusText}`
-      );
-    }
-
-    const { choices } = await chatRes.json();
-    const content = choices[0].message.content.trim();
-
-    // 2️⃣ Post an **org‑level** Discussion
-    await request("POST /orgs/{org}/discussions", {
-      org,
-      category_id: DISCUSSION_CATEGORY_ID,
-      title: `Tech Trends – Week of ${new Date().toLocaleDateString()}`,
-      body: content,
-      mediaType: { previews: ["symmetra-preview"] },
-      headers: {
-        authorization: `token ${GITHUB_TOKEN}`,
-      },
-    });
-
-    console.log("✅ Org discussion created");
+    }),
+  });
+  const createJson = await createRes.json();
+  if (createJson.errors) {
+    console.error(createJson.errors);
+    throw new Error("Failed to create discussion");
   }
 
-  // Run & catch
-  try {
-    await run();
-  } catch (err) {
-    console.error(err);
-    process.exit(1);
-  }
+  console.log(
+    "✅ Repo discussion created:",
+    createJson.data.createDiscussion.discussion.id
+  );
 })();
