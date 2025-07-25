@@ -1,0 +1,30 @@
+name: Bi‑Weekly Org Tech Trends
+
+on:
+  schedule:
+    # Runs at 09:00 UTC on the 1st and 15th of every month
+    - cron: '0 9 1,15 * *'
+
+jobs:
+  post-tech-trends:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}   # checks out <ORG>/.github
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install @octokit/request node-fetch
+
+      - name: Generate & Post Org Discussion
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DISCUSSION_CATEGORY_ID: ${{ secrets.DISCUSSION_CATEGORY_ID }}
+        run: node .github/scripts/generateTrendDiscussion.js
