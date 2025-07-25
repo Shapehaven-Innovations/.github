@@ -1,15 +1,21 @@
 name: Bi‑Weekly Org Tech Trends
 
+# Grant the Actions token permission to write discussions
+permissions:
+  contents: read
+  discussions: write
+
 on:
-  workflow_dispatch:
+  workflow_dispatch:    # manual trigger
   schedule:
-    - cron: '0 9 1,15 * *'  # 09:00 UTC on the 1st & 15th
+    - cron: '0 9 1,15 * *'  # 09:00 UTC on 1st & 15th
 
 jobs:
   post-tech-trends:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -19,7 +25,7 @@ jobs:
       - name: Generate & Post Discussion
         run: node scripts/generateTrendDiscussion.js
         env:
+          # e.g. "my-org/.github"
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY }}
-
