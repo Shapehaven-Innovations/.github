@@ -1,33 +1,25 @@
-# .github/workflows/tech-trends-discussion.yml
 name: Bi‑Weekly Org Tech Trends
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 9 1,15 * *'
+    - cron: '0 9 1,15 * *'  # 09:00 UTC on the 1st & 15th
 
 jobs:
   post-tech-trends:
     runs-on: ubuntu-latest
     steps:
-      # 1) Checkout the org’s .github repo
       - uses: actions/checkout@v4
 
-      # 2) Use Node.js 18
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
 
-      # 3) Install only the one package you need
-      - name: Install @octokit/request
-        run: npm install @octokit/request
-
-      # 4) Fire your trend‑generator
       - name: Generate & Post Discussion
-        env:
-          GITHUB_REPOSITORY:      ${{ github.repository }}
-          GITHUB_TOKEN:           ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_API_KEY:         ${{ secrets.OPENAI_API_KEY }}
-          DISCUSSION_CATEGORY_ID: ${{ secrets.DISCUSSION_CATEGORY_ID }}
         run: node scripts/generateTrendDiscussion.js
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY }}
+
