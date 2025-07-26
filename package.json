@@ -15,5 +15,9 @@
     "url": "https://github.com/Shapehaven-Innovations/.github/issues"
   },
   "homepage": "https://github.com/Shapehaven-Innovations/.github#readme",
-  "description": ""
+  "description": "",
+  "dependencies": {
+    "@octokit/auth-app": "^8.0.2",
+    "node-fetch": "^3.3.2"
+  }
 }
