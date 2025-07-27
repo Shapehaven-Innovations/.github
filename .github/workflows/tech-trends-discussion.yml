@@ -1,59 +1,50 @@
-name: "Bi‑Weekly Org Tech Trends" # Friendly name shown in the Actions UI
+name: "Bi‑Weekly Org Tech Trends"
 
-# When to run this workflow:
 on:
-  workflow_dispatch: # Allows manual “Run workflow” trigger
+  workflow_dispatch:
   schedule:
-    - cron: "0 9 1,15 * *" # Automatically at 09:00 UTC on the 1st and 15th of each month
+    - cron: "0 9 1,15 * *" # 09:00 UTC on the 1st & 15th
 
-# What GitHub permissions the job needs:
 permissions:
-  contents: read # Needed for checking out the repo
-  discussions: write # Needed to create a GitHub Discussion
+  contents: read # for checkout
+  discussions: write # to list categories + create discussions
 
-# Environment variables available to all jobs/steps:
 env:
-  GITHUB_REPOSITORY: ${{ github.repository }} # e.g. "your-org/your-repo"
-  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Your OpenAI API key
-  OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }} # (Optional) model override, e.g. "gpt-4"
-  GITHUB_APP_ID: ${{ secrets.SH_APP_ID }} # GitHub App ID
-  GITHUB_INSTALLATION_ID: ${{ secrets.SH_INSTALLATION_ID }} # App installation ID
-  APP_PRIVATE_KEY: ${{ secrets.SH_PRIVATE_KEY }} # PEM-formatted private key
+  GITHUB_REPOSITORY: ${{ github.repository }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }} # optional override
+  # (no more GitHub App secrets needed when using GITHUB_TOKEN)
 
 jobs:
   post-tech-trends:
-    runs-on: ubuntu-latest # Use the latest Ubuntu runner
-
-    defaults: # Set defaults for all run: steps
+    runs-on: ubuntu-latest
+    defaults:
       run:
-        working-directory: ${{ github.workspace }} # Root of your repository
+        working-directory: ${{ github.workspace }}
 
     steps:
-      - name: Check out code
+      - name: Check out repository
         uses: actions/checkout@v4
-        # Fetches your repository so the runner can read your scripts
 
-      - name: Setup Node.js (with cache)
+      - name: Setup Node.js (with npm cache)
         uses: actions/setup-node@v4
         with:
-          node-version: "18" # Specify Node.js version
-          cache: "npm" # Cache your npm modules
-          cache-dependency-path: "package-lock.json" # Invalidate cache when lockfile changes
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: "package-lock.json"
 
       - name: Install dependencies
         run: npm ci
-        # Clean‑install from your lockfile for reproducible builds
 
       - name: Generate & post Tech Trends discussion
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # expose built‑in token
         run: node scripts/generateTrendDiscussion.js
-        # Runs your refactored script which calls OpenAI → formats JSON → posts to Discussions
 
-      - name: Notify success
+      - name: Success notification
         if: ${{ success() }}
         run: echo "✅ Tech Trends discussion posted."
-        # Prints a success message if all previous steps passed
 
-      - name: Notify failure
+      - name: Failure notification
         if: ${{ failure() }}
-        run: echo "::error ::❌ Failed to post discussion."
-        # Emits a red error banner in the Actions UI if anything failed
+        run: echo "::error ::❌ Failed to post Tech Trends discussion."

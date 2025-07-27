@@ -40,9 +40,6 @@ const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY; // provided by Actions
 const [owner, repo] = GITHUB_REPOSITORY.split("/");
 
 // ─── HELPERS ───────────────────────────────────────────────────────────────────
-/**
- * Retry an async operation on failure with exponential backoff.
- */
 async function withRetry(fn, retries = 2, delay = 500) {
   try {
     return await fn();
@@ -58,9 +55,6 @@ async function withRetry(fn, retries = 2, delay = 500) {
   }
 }
 
-/**
- * Generate an array of { title, description } via OpenAI Chat.
- */
 async function fetchTrends() {
   console.log(`🔍 Generating trends via OpenAI (model=${OPENAI_MODEL})…`);
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -100,11 +94,8 @@ async function fetchTrends() {
   return trends;
 }
 
-/**
- * Find the “Tech Trends” discussion category ID in this repo.
- */
 async function getDiscussionCategoryId(octokit) {
-  // Use the raw REST endpoint
+  // use raw REST endpoint for discussion-categories
   const { data: categories } = await octokit.request(
     "GET /repos/{owner}/{repo}/discussion-categories",
     { owner, repo }
@@ -113,20 +104,17 @@ async function getDiscussionCategoryId(octokit) {
   const cat = categories.find((c) => c.name === "Tech Trends");
   if (!cat) {
     throw new Error(
-      'Discussion category "Tech Trends" not found. Create it in your repo settings.'
+      'Discussion category "Tech Trends" not found. Please create it in your repo settings.'
     );
   }
   return cat.id;
 }
 
-/**
- * Post a new discussion with the given markdown body.
- */
 async function postDiscussion(markdown) {
   const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
   const category_id = await getDiscussionCategoryId(octokit);
-  const title = `Org Tech Trends — ${new Date().toLocaleDateString("en-US")}`;
+  const title = `Org Tech Trends — ${new Date().toLocaleDateString("en‑US")}`;
 
   await octokit.rest.discussions.create({
     owner,
@@ -145,7 +133,6 @@ async function postDiscussion(markdown) {
       throw new Error("OpenAI returned an empty list of trends.");
     }
 
-    // Build markdown: each trend as H3 + paragraph, separated by rules
     const markdown = trends
       .map(
         ({ title, description }) =>
