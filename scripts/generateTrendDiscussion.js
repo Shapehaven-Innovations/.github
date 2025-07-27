@@ -22,24 +22,25 @@ import { createAppAuth } from "@octokit/auth-app";
 // ─── ENVIRONMENT SETUP ─────────────────────────────────────────────────────────
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = (process.env.OPENAI_MODEL || "").trim() || "gpt-4";
-const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY; // set by Actions
+const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
 const GITHUB_APP_ID = process.env.GITHUB_APP_ID;
 const GITHUB_INSTALLATION_ID = process.env.GITHUB_INSTALLATION_ID;
-const APP_PRIVATE_KEY = process.env.APP_PRIVATE_KEY?.replace(/\\n/g, "\n");
 
-// fail fast if any required var is missing
-[
-  ["OPENAI_API_KEY", OPENAI_API_KEY],
-  ["GITHUB_REPOSITORY", GITHUB_REPOSITORY],
-  ["GITHUB_APP_ID", GITHUB_APP_ID],
-  ["GITHUB_INSTALLATION_ID", GITHUB_INSTALLATION_ID],
-  ["APP_PRIVATE_KEY", APP_PRIVATE_KEY],
-].forEach(([name, val]) => {
-  if (!val) {
-    console.error(`❌ Missing required environment variable: ${name}`);
-    process.exit(1);
-  }
-});
+// Robust PEM handling:
+let APP_PRIVATE_KEY = process.env.APP_PRIVATE_KEY;
+if (!APP_PRIVATE_KEY) {
+  console.error("❌ Missing required environment variable: APP_PRIVATE_KEY");
+  process.exit(1);
+}
+if (APP_PRIVATE_KEY.includes("\\n")) {
+  APP_PRIVATE_KEY = APP_PRIVATE_KEY.replace(/\\n/g, "\n");
+}
+if (!APP_PRIVATE_KEY.startsWith("-----BEGIN")) {
+  console.error(
+    "❌ APP_PRIVATE_KEY is not a valid PEM (doesn't start with -----BEGIN)."
+  );
+  process.exit(1);
+}
 
 const [owner, repo] = GITHUB_REPOSITORY.split("/");
 
