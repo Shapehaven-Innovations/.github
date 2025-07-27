@@ -1,60 +1,59 @@
-name: "Bi‑Weekly Org Tech Trends"
+name: "Bi‑Weekly Org Tech Trends" # Friendly name shown in the Actions UI
 
-concurrency:
-  group: tech-trends-post
-  cancel-in-progress: true
-
+# When to run this workflow:
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Allows manual “Run workflow” trigger
   schedule:
-    - cron: "0 9 1,15 * *" # 09:00 UTC on the 1st & 15th
+    - cron: "0 9 1,15 * *" # Automatically at 09:00 UTC on the 1st and 15th of each month
 
+# What GitHub permissions the job needs:
 permissions:
-  contents: read
-  discussions: write
+  contents: read # Needed for checking out the repo
+  discussions: write # Needed to create a GitHub Discussion
+
+# Environment variables available to all jobs/steps:
+env:
+  GITHUB_REPOSITORY: ${{ github.repository }} # e.g. "your-org/your-repo"
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Your OpenAI API key
+  OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }} # (Optional) model override, e.g. "gpt-4"
+  GITHUB_APP_ID: ${{ secrets.SH_APP_ID }} # GitHub App ID
+  GITHUB_INSTALLATION_ID: ${{ secrets.SH_INSTALLATION_ID }} # App installation ID
+  APP_PRIVATE_KEY: ${{ secrets.SH_PRIVATE_KEY }} # PEM-formatted private key
 
 jobs:
   post-tech-trends:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # Use the latest Ubuntu runner
 
-    defaults:
+    defaults: # Set defaults for all run: steps
       run:
-        # make sure every `run:` is invoked from the repo root
-        working-directory: ${{ github.workspace }}
-
-    env:
-      GITHUB_REPOSITORY: ${{ github.repository }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      GITHUB_APP_ID: ${{ secrets.SH_APP_ID }}
-      GITHUB_INSTALLATION_ID: ${{ secrets.SH_INSTALLATION_ID }}
-      APP_PRIVATE_KEY: ${{ secrets.SH_PRIVATE_KEY }}
+        working-directory: ${{ github.workspace }} # Root of your repository
 
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+        # Fetches your repository so the runner can read your scripts
 
-      - name: Setup Node.js (with npm cache)
+      - name: Setup Node.js (with cache)
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
-          cache: "npm"
-          cache-dependency-path: "package-lock.json"
+          node-version: "18" # Specify Node.js version
+          cache: "npm" # Cache your npm modules
+          cache-dependency-path: "package-lock.json" # Invalidate cache when lockfile changes
 
       - name: Install dependencies
         run: npm ci
-
-      - name: (Optional) Lint & type‑check
-        run: |
-          npm run lint   || echo "no lint script, skipping"
-          npm run type-check || echo "no type-check script, skipping"
+        # Clean‑install from your lockfile for reproducible builds
 
       - name: Generate & post Tech Trends discussion
         run: node scripts/generateTrendDiscussion.js
+        # Runs your refactored script which calls OpenAI → formats JSON → posts to Discussions
 
-      - name: Success notification
+      - name: Notify success
         if: ${{ success() }}
-        run: echo "✅ Tech Trends discussion posted successfully."
+        run: echo "✅ Tech Trends discussion posted."
+        # Prints a success message if all previous steps passed
 
-      - name: Failure notification
+      - name: Notify failure
         if: ${{ failure() }}
-        run: echo "::error ::❌ Discussion post failed — see logs above."
+        run: echo "::error ::❌ Failed to post discussion."
+        # Emits a red error banner in the Actions UI if anything failed
