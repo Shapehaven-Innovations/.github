@@ -4,9 +4,16 @@
 /**
  * generateTrendDiscussion.js
  *
- * Deps (package.json):
- *   "openai", "@octokit/rest", "@octokit/auth-app"
- * ESM:  "type": "module"
+ * Production‑ready:
+ *  1. Generate tech trends via OpenAI Chat.
+ *  2. Authenticate as your GitHub App and fetch the “Tech Trends” category.
+ *  3. Post a new Discussion in that category as your App.
+ *
+ * Deps:   "openai", "@octokit/rest", "@octokit/auth-app"
+ * ESM:    "type":"module" in package.json
+ * Envs:   OPENAI_API_KEY, (opt) OPENAI_MODEL, GITHUB_REPOSITORY,
+ *         GITHUB_APP_ID, GITHUB_INSTALLATION_ID, APP_PRIVATE_KEY
+ * Perms:  contents: read, discussions: write
  */
 
 import process from "process";
@@ -21,11 +28,13 @@ const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
 const GITHUB_APP_ID = process.env.GITHUB_APP_ID;
 const GITHUB_INSTALLATION_ID = process.env.GITHUB_INSTALLATION_ID;
 
+// support multi‑line or escaped PEM
 let APP_PRIVATE_KEY = process.env.APP_PRIVATE_KEY;
 if (APP_PRIVATE_KEY?.includes("\\n")) {
   APP_PRIVATE_KEY = APP_PRIVATE_KEY.replace(/\\n/g, "\n");
 }
 
+// fail fast on missing
 for (const [name, val] of [
   ["OPENAI_API_KEY", OPENAI_API_KEY],
   ["GITHUB_REPOSITORY", GITHUB_REPOSITORY],
@@ -39,17 +48,18 @@ for (const [name, val] of [
   }
 }
 
+// default model
 if (!OPENAI_MODEL?.trim()) {
   OPENAI_MODEL = "gpt-4";
 }
 
 const [owner, repo] = GITHUB_REPOSITORY.split("/");
 if (!owner || !repo) {
-  console.error(`❌ Invalid GITHUB_REPOSITORY, expected "owner/repo"`);
+  console.error(`❌ GITHUB_REPOSITORY must be "owner/repo"`);
   process.exit(1);
 }
 
-// ─── UTILITY: retry on transient failures ─────────────────────────────────────
+// ─── UTILITY: retry transient failures ─────────────────────────────────────
 async function withRetry(fn, retries = 2, delay = 500) {
   try {
     return await fn();
@@ -75,7 +85,7 @@ async function fetchTrends() {
         {
           role: "system",
           content:
-            'You are a helpful assistant. Respond *only* with a JSON array of objects, each with keys "title" and "description".',
+            'You are a helpful assistant. Reply *only* with a JSON array of objects, each with keys "title" and "description".',
         },
         {
           role: "user",
@@ -104,12 +114,17 @@ async function fetchTrends() {
   return trends;
 }
 
-// ─── STEP 2: LOOK UP CATEGORY VIA CORRECT REST PATH ───────────────────────────
+// ─── STEP 2: LOOK UP CATEGORY VIA REST (with mercy‑preview) ───────────────────
 async function getCategoryId(octokit) {
-  // ⚠️ Correct endpoint: singular "discussion-categories"
   const { data: categories } = await octokit.request(
     "GET /repos/{owner}/{repo}/discussion-categories",
-    { owner, repo }
+    {
+      owner,
+      repo,
+      mediaType: {
+        previews: ["mercy"], // ← **required** for Discussions REST API
+      },
+    }
   );
 
   const cat = categories.find((c) => c.name === "Tech Trends");
@@ -119,7 +134,7 @@ async function getCategoryId(octokit) {
   return cat.id;
 }
 
-// ─── STEP 3: POST DISCUSSION AS YOUR APP ───────────────────────────────────────
+// ─── STEP 3: POST DISCUSSION AS GITHUB APP ────────────────────────────────────
 async function postDiscussion(markdown) {
   const octokit = new Octokit({
     authStrategy: createAppAuth,
