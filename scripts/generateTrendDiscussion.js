@@ -4,24 +4,28 @@
 /**
  * generateTrendDiscussion.js
  *
+\
+ *
  * Requirements:
- *  • Node 18+ (uses global fetch)
- *  • Envs: OPENAI_API_KEY, GITHUB_TOKEN, GITHUB_REPOSITORY
+ *  • Node 18+ (uses global fetch or install node-fetch)
+ *  • Envs: OPENAI_API_KEY, (optional) OPENAI_MODEL, GITHUB_TOKEN, GITHUB_REPOSITORY
  *  • Workflow permissions: discussions: write
  */
 
 async function main() {
   // ─── ENV VARS ───────────────────────────────────────────────────────────────
-  const {
-    OPENAI_API_KEY,
-    OPENAI_MODEL = "gpt-4",
-    GITHUB_TOKEN,
-    GITHUB_REPOSITORY,
-  } = process.env;
+  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  let OPENAI_MODEL = process.env.OPENAI_MODEL;
+  const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+  const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
 
   if (!OPENAI_API_KEY) {
     console.error("❌ Missing environment variable: OPENAI_API_KEY");
     process.exit(1);
+  }
+  // Fallback if the secret is unset or blank
+  if (!OPENAI_MODEL || !OPENAI_MODEL.trim()) {
+    OPENAI_MODEL = "gpt-4";
   }
   if (!GITHUB_TOKEN) {
     console.error("❌ Missing environment variable: GITHUB_TOKEN");
@@ -99,7 +103,14 @@ async function main() {
     const raw = choices?.[0]?.message?.content?.trim();
     if (!raw) throw new Error("Empty response from OpenAI");
 
-    const trends = JSON.parse(raw);
+    let trends;
+    try {
+      trends = JSON.parse(raw);
+    } catch (e) {
+      console.error("❌ Failed to parse JSON from OpenAI:");
+      console.error(raw);
+      throw e;
+    }
     if (!Array.isArray(trends) || trends.length === 0) {
       throw new Error("Parsed OpenAI JSON is not a non‑empty array");
     }
