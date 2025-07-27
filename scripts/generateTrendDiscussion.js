@@ -132,14 +132,7 @@ async function getDiscussionCategoryId(octokit) {
 }
 
 async function postDiscussion(markdown) {
-  const octokit = new Octokit({
-    authStrategy: createAppAuth,
-    auth: {
-      appId: Number(GITHUB_APP_ID),
-      privateKey: APP_PRIVATE_KEY,
-      installationId: Number(GITHUB_INSTALLATION_ID),
-    },
-  });
+  const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
   const category_id = await getDiscussionCategoryId(octokit);
   const title = `Org Tech Trends — ${new Date().toLocaleDateString("en-US")}`;
