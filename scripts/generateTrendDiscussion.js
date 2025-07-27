@@ -4,209 +4,180 @@
 /**
  * generateTrendDiscussion.js
  *
-\
+ * Production‐ready script to:
+ *  1. Generate a list of tech trends via OpenAI Chat.
+ *  2. Look up your GitHub App’s installation token for this repo.
+ *  3. Find the “Tech Trends” discussion‐category via REST.
+ *  4. Create a new discussion in that category as your GitHub App.
  *
  * Requirements:
- *  • Node 18+ (uses global fetch or install node-fetch)
- *  • Envs: OPENAI_API_KEY, (optional) OPENAI_MODEL, GITHUB_TOKEN, GITHUB_REPOSITORY
- *  • Workflow permissions: discussions: write
+ *  • package.json deps: "openai", "@octokit/rest", "@octokit/auth-app"
+ *  • Node 18+ (ESM module; "type":"module" in package.json)
+ *  • Envs:
+ *     – OPENAI_API_KEY
+ *     – (optional) OPENAI_MODEL (defaults to "gpt-4")
+ *     – GITHUB_REPOSITORY (in form "owner/repo", provided by Actions)
+ *     – GITHUB_APP_ID
+ *     – GITHUB_INSTALLATION_ID
+ *     – APP_PRIVATE_KEY (full PEM; escaped `\n` → real newlines handled)
+ *  • Workflow permissions: contents: read, discussions: write
  */
 
-async function main() {
-  // ─── ENV VARS ───────────────────────────────────────────────────────────────
-  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-  let OPENAI_MODEL = process.env.OPENAI_MODEL;
-  const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-  const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
+import process from "process";
+import { OpenAI } from "openai";
+import { Octokit } from "@octokit/rest";
+import { createAppAuth } from "@octokit/auth-app";
 
-  if (!OPENAI_API_KEY) {
-    console.error("❌ Missing environment variable: OPENAI_API_KEY");
+// ─── ENV VARS & VALIDATION ────────────────────────────────────────────────────
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+let OPENAI_MODEL = process.env.OPENAI_MODEL;
+const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
+const GITHUB_APP_ID = process.env.GITHUB_APP_ID;
+const GITHUB_INSTALLATION_ID = process.env.GITHUB_INSTALLATION_ID;
+
+// handle APP_PRIVATE_KEY multi‐line or escaped
+let APP_PRIVATE_KEY = process.env.APP_PRIVATE_KEY;
+if (APP_PRIVATE_KEY?.includes("\\n")) {
+  APP_PRIVATE_KEY = APP_PRIVATE_KEY.replace(/\\n/g, "\n");
+}
+
+// fail fast on missing
+for (const [name, val] of [
+  ["OPENAI_API_KEY", OPENAI_API_KEY],
+  ["GITHUB_REPOSITORY", GITHUB_REPOSITORY],
+  ["GITHUB_APP_ID", GITHUB_APP_ID],
+  ["GITHUB_INSTALLATION_ID", GITHUB_INSTALLATION_ID],
+  ["APP_PRIVATE_KEY", APP_PRIVATE_KEY],
+]) {
+  if (!val) {
+    console.error(`❌ Missing required env var ${name}`);
     process.exit(1);
   }
-  // Fallback if the secret is unset or blank
-  if (!OPENAI_MODEL || !OPENAI_MODEL.trim()) {
-    OPENAI_MODEL = "gpt-4";
-  }
-  if (!GITHUB_TOKEN) {
-    console.error("❌ Missing environment variable: GITHUB_TOKEN");
-    process.exit(1);
-  }
-  if (!GITHUB_REPOSITORY) {
-    console.error("❌ Missing environment variable: GITHUB_REPOSITORY");
-    process.exit(1);
-  }
+}
 
-  const [owner, repo] = GITHUB_REPOSITORY.split("/");
-  if (!owner || !repo) {
-    console.error(
-      `❌ Invalid GITHUB_REPOSITORY (“${GITHUB_REPOSITORY}”). Expect “owner/repo”.`
-    );
-    process.exit(1);
-  }
+// default model
+if (!OPENAI_MODEL?.trim()) {
+  OPENAI_MODEL = "gpt-4";
+}
 
-  // ─── HELPERS ─────────────────────────────────────────────────────────────────
-  async function withRetry(fn, retries = 2, delay = 500) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (retries > 0) {
-        console.warn(`⚠️ Retry in ${delay}ms after error: ${err.message}`);
-        await new Promise((r) => setTimeout(r, delay));
-        return withRetry(fn, retries - 1, delay * 2);
-      }
-      throw err;
-    }
-  }
+const [owner, repo] = GITHUB_REPOSITORY.split("/");
+if (!owner || !repo) {
+  console.error(
+    `❌ GITHUB_REPOSITORY must be "owner/repo", got "${GITHUB_REPOSITORY}"`
+  );
+  process.exit(1);
+}
 
-  // ─── STEP 1: Generate trends via OpenAI ────────────────────────────────────────
-  let markdownBody;
+// ─── HELPER: retry transient failures ──────────────────────────────────────────
+async function withRetry(fn, retries = 2, delay = 500) {
   try {
-    const weekOf = new Date().toLocaleDateString("en-US", {
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    });
+    return await fn();
+  } catch (err) {
+    if (retries > 0) {
+      console.warn(`⚠️ Retry in ${delay}ms after error: ${err.message}`);
+      await new Promise((r) => setTimeout(r, delay));
+      return withRetry(fn, retries - 1, delay * 2);
+    }
+    throw err;
+  }
+}
 
-    console.log(`🔍 Generating trends from OpenAI (model=${OPENAI_MODEL})…`);
-    const aiRes = await withRetry(() =>
-      fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
+// ─── STEP 1: Generate trends via OpenAI ────────────────────────────────────────
+async function fetchTrends() {
+  console.log(`🔍 Generating trends via OpenAI (model=${OPENAI_MODEL})…`);
+  const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+  const resp = await withRetry(() =>
+    openai.chat.completions.create({
+      model: OPENAI_MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            'You are a helpful assistant. Reply *only* with a JSON array of objects, each with keys "title" (string) and "description" (string).',
         },
-        body: JSON.stringify({
-          model: OPENAI_MODEL,
-          messages: [
-            {
-              role: "system",
-              content:
-                'You are a helpful assistant. Reply *only* with a JSON array of objects, each with keys "title" and "description".',
-            },
-            {
-              role: "user",
-              content: `List the top 5 upcoming enterprise technology trends for the week of ${weekOf} as JSON.`,
-            },
-          ],
-          temperature: 0.7,
-          max_tokens: 500,
-        }),
-      })
-    );
+        {
+          role: "user",
+          content:
+            "List the top 5 upcoming enterprise technology trends as JSON.",
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 500,
+    })
+  );
 
-    if (!aiRes.ok) {
-      const text = await aiRes.text();
-      throw new Error(`OpenAI error ${aiRes.status}: ${text}`);
-    }
+  const raw = resp.choices?.[0]?.message?.content?.trim();
+  if (!raw) {
+    throw new Error("Empty response from OpenAI");
+  }
 
-    const { choices } = await aiRes.json();
-    const raw = choices?.[0]?.message?.content?.trim();
-    if (!raw) throw new Error("Empty response from OpenAI");
+  let trends;
+  try {
+    trends = JSON.parse(raw);
+  } catch (e) {
+    console.error("❌ Failed to parse OpenAI JSON:", raw);
+    throw new Error(e.message);
+  }
+  if (!Array.isArray(trends) || trends.length === 0) {
+    throw new Error("Parsed data is not a non‑empty array");
+  }
+  return trends;
+}
 
-    let trends;
-    try {
-      trends = JSON.parse(raw);
-    } catch (e) {
-      console.error("❌ Failed to parse JSON from OpenAI:");
-      console.error(raw);
-      throw e;
-    }
-    if (!Array.isArray(trends) || trends.length === 0) {
-      throw new Error("Parsed OpenAI JSON is not a non‑empty array");
-    }
+// ─── STEP 2: Lookup category via REST ──────────────────────────────────────────
+async function getCategoryId(octokit) {
+  const { data } = await octokit.request(
+    "GET /repos/{owner}/{repo}/discussions/categories",
+    { owner, repo }
+  );
+  const cat = data.find((c) => c.name === "Tech Trends");
+  if (!cat) {
+    throw new Error('Discussion category "Tech Trends" not found');
+  }
+  return cat.id;
+}
 
-    markdownBody = trends
+// ─── STEP 3: Post discussion as GitHub App ────────────────────────────────────
+async function postDiscussion(markdown) {
+  const octokit = new Octokit({
+    authStrategy: createAppAuth,
+    auth: {
+      appId: Number(GITHUB_APP_ID),
+      privateKey: APP_PRIVATE_KEY,
+      installationId: Number(GITHUB_INSTALLATION_ID),
+    },
+  });
+
+  const category_id = await getCategoryId(octokit);
+  const title = `Tech Trends — ${new Date().toLocaleDateString("en-US")}`;
+
+  await octokit.rest.discussions.create({
+    owner,
+    repo,
+    category_id,
+    title,
+    body: markdown,
+  });
+
+  console.log("✅ Discussion posted by GitHub App!");
+}
+
+// ─── ORCHESTRATION ────────────────────────────────────────────────────────────
+(async () => {
+  try {
+    const trends = await fetchTrends();
+    const markdown = trends
       .map(
         ({ title, description }) =>
           `### ${title.trim()}\n\n${description.trim().replace(/\r?\n/g, "\n")}`
       )
       .join("\n\n---\n\n");
+
+    console.log("💬 Posting discussion to GitHub...");
+    await postDiscussion(markdown);
   } catch (err) {
-    console.error("❌ Error generating trends:", err);
+    console.error("❌ Fatal error:", err.message);
     process.exit(1);
   }
-
-  // ─── STEP 2: Fetch repo ID & category ID via GraphQL ──────────────────────────
-  let repositoryId, categoryId;
-  try {
-    console.log("🔎 Fetching repository ID and discussion categories…");
-    const query = `
-      query ($owner: String!, $repo: String!) {
-        repository(owner: $owner, name: $repo) {
-          id
-          discussionCategories(first: 20) {
-            nodes { id name }
-          }
-        }
-      }
-    `;
-    const ghRes = await fetch("https://api.github.com/graphql", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
-      },
-      body: JSON.stringify({ query, variables: { owner, repo } }),
-    });
-    const ghJson = await ghRes.json();
-    if (ghJson.errors) throw new Error(JSON.stringify(ghJson.errors));
-
-    repositoryId = ghJson.data.repository.id;
-    const cats = ghJson.data.repository.discussionCategories.nodes;
-    const cat = cats.find((c) => c.name === "Tech Trends");
-    if (!cat) throw new Error('Category "Tech Trends" not found');
-    categoryId = cat.id;
-  } catch (err) {
-    console.error("❌ Error fetching GitHub data:", err);
-    process.exit(1);
-  }
-
-  // ─── STEP 3: Create the Discussion via GraphQL ───────────────────────────────
-  try {
-    console.log("💬 Creating GitHub Discussion…");
-    const mutation = `
-      mutation ($input: CreateDiscussionInput!) {
-        createDiscussion(input: $input) {
-          discussion { url }
-        }
-      }
-    `;
-    const variables = {
-      input: {
-        repositoryId,
-        categoryId,
-        title: `Tech Trends – Week of ${new Date().toLocaleDateString("en-US", {
-          month: "long",
-          day: "numeric",
-          year: "numeric",
-        })}`,
-        body: markdownBody,
-      },
-    };
-
-    const createRes = await fetch("https://api.github.com/graphql", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
-      },
-      body: JSON.stringify({ query: mutation, variables }),
-    });
-
-    const createJson = await createRes.json();
-    if (createJson.errors) throw new Error(JSON.stringify(createJson.errors));
-
-    console.log(
-      "✅ Discussion created at:",
-      createJson.data.createDiscussion.discussion.url
-    );
-  } catch (err) {
-    console.error("❌ Error creating discussion:", err);
-    process.exit(1);
-  }
-}
-
-main().catch((err) => {
-  console.error("❌ Fatal error:", err);
-  process.exit(1);
-});
+})();
