@@ -108,11 +108,11 @@ async function fetchTrends() {
  * Find the “Tech Trends” discussion category ID in this repo.
  */
 async function getDiscussionCategoryId(octokit) {
-  const { data: categories } =
-    await octokit.rest.repos.listDiscussionCategories({
-      owner,
-      repo,
-    });
+  // Use the raw REST endpoint in case the plugin method isn't available
+  const { data: categories } = await octokit.request(
+    "GET /repos/{owner}/{repo}/discussion-categories",
+    { owner, repo }
+  );
 
   const cat = categories.find((c) => c.name === "Tech Trends");
   if (!cat) {
