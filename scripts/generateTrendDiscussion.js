@@ -114,18 +114,18 @@ async function fetchTrends() {
 
 /**
  * Find the “Tech Trends” discussion category ID in this repo.
- * **Fixed endpoint**: must call /discussions/categories, not /discussion-categories.
  */
 async function getDiscussionCategoryId(octokit) {
+  // ⚠️ Note: singular "discussion-categories"
   const { data: categories } = await octokit.request(
-    "GET /repos/{owner}/{repo}/discussions/categories",
+    "GET /repos/{owner}/{repo}/discussion-categories",
     { owner, repo }
   );
 
   const cat = categories.find((c) => c.name === "Tech Trends");
   if (!cat) {
     throw new Error(
-      'Discussion category "Tech Trends" not found. Create it in your repo settings.'
+      'Discussion category "Tech Trends" not found. Please create it in your repo settings.'
     );
   }
   return cat.id;
