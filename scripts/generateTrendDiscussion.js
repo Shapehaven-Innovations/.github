@@ -6,14 +6,6 @@
  * Uses OpenAI to generate a list of tech‑trend entries (JSON),
  * then posts them to your GitHub Discussions under the “Tech Trends” category,
  * authenticating with the built‑in GITHUB_TOKEN.
- *
- * Production‑ready:
- *  • Validates required env vars (fails fast if missing)
- *  • Fallback for OPENAI_MODEL when blank or unset
- *  • Retries transient network errors with exponential back‑off
- *  • Strict JSON parsing & error logging
- *  • Dynamically looks up “Tech Trends” category via raw REST endpoint
- *  • Posts markdown to GitHub Discussions
  */
 
 import { OpenAI } from "openai";
@@ -23,9 +15,9 @@ import { Octokit } from "@octokit/rest";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = (process.env.OPENAI_MODEL || "").trim() || "gpt-4";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY; // provided by Actions
+const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY; // injected by Actions
 
-// fail fast if any required var is missing
+// Fail fast if any required var is missing
 [
   ["OPENAI_API_KEY", OPENAI_API_KEY],
   ["GITHUB_TOKEN", GITHUB_TOKEN],
@@ -45,9 +37,7 @@ async function withRetry(fn, retries = 2, delay = 500) {
     return await fn();
   } catch (err) {
     if (retries > 0) {
-      console.warn(
-        `⚠️ Operation failed (${err.message}), retrying in ${delay}ms…`
-      );
+      console.warn(`⚠️ ${err.message} — retrying in ${delay}ms…`);
       await new Promise((res) => setTimeout(res, delay));
       return withRetry(fn, retries - 1, delay * 2);
     }
@@ -59,7 +49,7 @@ async function fetchTrends() {
   console.log(`🔍 Generating trends via OpenAI (model=${OPENAI_MODEL})…`);
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-  const res = await withRetry(() =>
+  const resp = await withRetry(() =>
     openai.chat.completions.create({
       model: OPENAI_MODEL,
       messages: [
@@ -78,33 +68,29 @@ async function fetchTrends() {
     })
   );
 
-  const raw = res.choices[0].message.content.trim();
+  const raw = resp.choices[0].message.content.trim();
   let trends;
   try {
     trends = JSON.parse(raw);
-    if (!Array.isArray(trends)) {
-      throw new Error("Parsed JSON is not an array");
-    }
+    if (!Array.isArray(trends)) throw new Error("JSON is not an array");
   } catch (err) {
-    console.error("❌ Failed to parse OpenAI JSON response:");
+    console.error("❌ Failed to parse OpenAI JSON:");
     console.error(raw);
-    throw new Error(`JSON parse error: ${err.message}`);
+    throw err;
   }
-
   return trends;
 }
 
 async function getDiscussionCategoryId(octokit) {
-  // use raw REST endpoint for discussion-categories
+  // correct REST endpoint for discussion categories
   const { data: categories } = await octokit.request(
     "GET /repos/{owner}/{repo}/discussion-categories",
     { owner, repo }
   );
-
   const cat = categories.find((c) => c.name === "Tech Trends");
   if (!cat) {
     throw new Error(
-      'Discussion category "Tech Trends" not found. Please create it in your repo settings.'
+      'Discussion category "Tech Trends" not found. Create it in your repo settings.'
     );
   }
   return cat.id;
@@ -112,10 +98,8 @@ async function getDiscussionCategoryId(octokit) {
 
 async function postDiscussion(markdown) {
   const octokit = new Octokit({ auth: GITHUB_TOKEN });
-
   const category_id = await getDiscussionCategoryId(octokit);
-  const title = `Org Tech Trends — ${new Date().toLocaleDateString("en‑US")}`;
-
+  const title = `Org Tech Trends — ${new Date().toLocaleDateString("en-US")}`;
   await octokit.rest.discussions.create({
     owner,
     repo,
@@ -129,9 +113,7 @@ async function postDiscussion(markdown) {
 (async () => {
   try {
     const trends = await fetchTrends();
-    if (trends.length === 0) {
-      throw new Error("OpenAI returned an empty list of trends.");
-    }
+    if (!trends.length) throw new Error("No trends returned from OpenAI");
 
     const markdown = trends
       .map(
@@ -140,12 +122,11 @@ async function postDiscussion(markdown) {
       )
       .join("\n\n---\n\n");
 
-    console.log("💬 Posting discussion to GitHub...");
+    console.log("💬 Posting discussion to GitHub…");
     await postDiscussion(markdown);
     console.log("✅ Discussion posted successfully!");
   } catch (err) {
     console.error("❌ Fatal error:", err.message);
-    console.error(err.stack);
     process.exit(1);
   }
 })();

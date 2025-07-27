@@ -6,14 +6,14 @@ on:
     - cron: "0 9 1,15 * *" # 09:00 UTC on the 1st & 15th
 
 permissions:
-  contents: read # for checkout
-  discussions: write # to list categories + create discussions
+  contents: read # required for actions/checkout
+  discussions: write # required to list categories & create discussions
 
 env:
   GITHUB_REPOSITORY: ${{ github.repository }}
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }} # optional override
-  # (no more GitHub App secrets needed when using GITHUB_TOKEN)
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # <— wire in the built‑in token
 
 jobs:
   post-tech-trends:
@@ -26,7 +26,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js (with npm cache)
+      - name: Set up Node.js (with npm cache)
         uses: actions/setup-node@v4
         with:
           node-version: "18"
@@ -37,8 +37,6 @@ jobs:
         run: npm ci
 
       - name: Generate & post Tech Trends discussion
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # expose built‑in token
         run: node scripts/generateTrendDiscussion.js
 
       - name: Success notification
