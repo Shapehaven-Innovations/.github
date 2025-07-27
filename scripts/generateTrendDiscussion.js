@@ -6,25 +6,23 @@
  * Uses OpenAI to generate a list of tech‑trend entries (JSON),
  * then posts them to your GitHub Discussions under the “Tech Trends” category.
  *
- * Features:
- *  • Asserts all required env vars (fails fast if any missing)
+ * Production‑ready:
+ *  • Validates all required env vars (fails fast if missing)
  *  • Fallback for OPENAI_MODEL when blank or unset
  *  • Retries transient network errors with exponential back‑off
- *  • Parses & validates JSON output from the AI
- *  • Dynamically looks up your “Tech Trends” discussion category by name
- *  • Posts a markdown‑formatted discussion
+ *  • Strict JSON parsing & error logging
+ *  • Dynamically looks up “Tech Trends” category via repos.listDiscussionCategories
+ *  • Posts markdown to GitHub Discussions
  */
 
 import { OpenAI } from "openai";
 import { Octokit } from "@octokit/rest";
 import { createAppAuth } from "@octokit/auth-app";
 
-//
-// ─── ENVIRONMENT SETUP ────────────────────────────────────────────────────────
-//
+// ─── ENVIRONMENT SETUP ─────────────────────────────────────────────────────────
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = (process.env.OPENAI_MODEL || "").trim() || "gpt-4";
-const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY; // automatically provided by Actions
+const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY; // set by Actions
 const GITHUB_APP_ID = process.env.GITHUB_APP_ID;
 const GITHUB_INSTALLATION_ID = process.env.GITHUB_INSTALLATION_ID;
 const APP_PRIVATE_KEY = process.env.APP_PRIVATE_KEY?.replace(/\\n/g, "\n");
@@ -45,11 +43,9 @@ const APP_PRIVATE_KEY = process.env.APP_PRIVATE_KEY?.replace(/\\n/g, "\n");
 
 const [owner, repo] = GITHUB_REPOSITORY.split("/");
 
-//
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-//
+// ─── HELPERS ───────────────────────────────────────────────────────────────────
 /**
- * Retry an async fn on failure with exponential backoff.
+ * Retry an async operation on failure with exponential backoff.
  */
 async function withRetry(fn, retries = 2, delay = 500) {
   try {
@@ -57,9 +53,9 @@ async function withRetry(fn, retries = 2, delay = 500) {
   } catch (err) {
     if (retries > 0) {
       console.warn(
-        `⚠️  Operation failed (${err.message}), retrying in ${delay}ms...`
+        `⚠️ Operation failed (${err.message}), retrying in ${delay}ms…`
       );
-      await new Promise((r) => setTimeout(r, delay));
+      await new Promise((res) => setTimeout(res, delay));
       return withRetry(fn, retries - 1, delay * 2);
     }
     throw err;
@@ -67,41 +63,40 @@ async function withRetry(fn, retries = 2, delay = 500) {
 }
 
 /**
- * Fetch a list of { title, description } via OpenAI Chat.
+ * Generate an array of { title, description } via OpenAI Chat.
  */
 async function fetchTrends() {
   console.log(`🔍 Generating trends via OpenAI (model=${OPENAI_MODEL})…`);
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-  const resp = await withRetry(() =>
+  const res = await withRetry(() =>
     openai.chat.completions.create({
       model: OPENAI_MODEL,
       messages: [
         {
           role: "system",
           content:
-            "You are a helpful assistant. " +
-            'Respond with nothing but a JSON array of objects, each with exactly two keys: "title" (short headline) and "description" (one paragraph).',
+            'You are a helpful assistant. Reply with nothing but a JSON array of objects, each having exactly two keys: "title" and "description".',
         },
         {
           role: "user",
           content:
-            "List the top 5 upcoming enterprise technology trends as JSON. Use concise titles and detailed descriptions.",
+            "List the top 5 upcoming enterprise technology trends as JSON.",
         },
       ],
       temperature: 0.7,
     })
   );
 
-  const raw = resp.choices[0].message.content.trim();
+  const raw = res.choices[0].message.content.trim();
   let trends;
   try {
     trends = JSON.parse(raw);
     if (!Array.isArray(trends)) {
-      throw new Error("Parsed value is not an array");
+      throw new Error("JSON is not an array");
     }
   } catch (err) {
-    console.error("❌ Failed to parse JSON from OpenAI:");
+    console.error("❌ Failed to parse OpenAI JSON response:");
     console.error(raw);
     throw new Error(`JSON parse error: ${err.message}`);
   }
@@ -110,17 +105,19 @@ async function fetchTrends() {
 }
 
 /**
- * Look up the category ID for “Tech Trends” in Discussions.
+ * Find the “Tech Trends” discussion category ID in this repo.
  */
 async function getDiscussionCategoryId(octokit) {
-  const { data: categories } = await octokit.rest.discussions.listCategories({
-    owner,
-    repo,
-  });
+  const { data: categories } =
+    await octokit.rest.repos.listDiscussionCategories({
+      owner,
+      repo,
+    });
+
   const cat = categories.find((c) => c.name === "Tech Trends");
   if (!cat) {
     throw new Error(
-      'Discussion category "Tech Trends" not found. Please create it or update the code.'
+      'Discussion category "Tech Trends" not found. Create it or update the code.'
     );
   }
   return cat.id;
@@ -151,18 +148,15 @@ async function postDiscussion(markdown) {
   });
 }
 
-//
-// ─── MAIN ORCHESTRATION ───────────────────────────────────────────────────────
-//
+// ─── MAIN ───────────────────────────────────────────────────────────────────────
 (async () => {
   try {
     const trends = await fetchTrends();
-
     if (trends.length === 0) {
-      throw new Error("OpenAI returned an empty array of trends.");
+      throw new Error("OpenAI returned an empty list of trends.");
     }
 
-    // build markdown: H3 title + paragraph, separated by horizontal rules
+    // Build markdown: each trend as H3 + paragraph, separated by rules
     const markdown = trends
       .map(
         ({ title, description }) =>
