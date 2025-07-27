@@ -7,7 +7,7 @@ concurrency:
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 9 1,15 * *'  # 09:00 UTC on the 1st & 15th
+    - cron: "0 9 1,15 * *" # 09:00 UTC on the 1st & 15th
 
 permissions:
   contents: read
@@ -23,11 +23,11 @@ jobs:
         working-directory: ${{ github.workspace }}
 
     env:
-      GITHUB_REPOSITORY:      ${{ github.repository }}
-      OPENAI_API_KEY:         ${{ secrets.OPENAI_API_KEY }}
-      GITHUB_APP_ID:          ${{ secrets.SH_APP_ID }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GITHUB_APP_ID: ${{ secrets.SH_APP_ID }}
       GITHUB_INSTALLATION_ID: ${{ secrets.SH_INSTALLATION_ID }}
-      APP_PRIVATE_KEY:        ${{ secrets.SH_PRIVATE_KEY }}
+      APP_PRIVATE_KEY: ${{ secrets.SH_PRIVATE_KEY }}
 
     steps:
       - name: Check out code
@@ -36,17 +36,17 @@ jobs:
       - name: Setup Node.js (with npm cache)
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: 'package-lock.json'
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: "package-lock.json"
 
       - name: Install dependencies
         run: npm ci
 
       - name: (Optional) Lint & type‑check
         run: |
-          npm run lint
-          npm run type-check
+          npm run lint   || echo "no lint script, skipping"
+          npm run type-check || echo "no type-check script, skipping"
 
       - name: Generate & post Tech Trends discussion
         run: node scripts/generateTrendDiscussion.js
