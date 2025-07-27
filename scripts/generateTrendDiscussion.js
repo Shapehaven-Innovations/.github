@@ -4,7 +4,8 @@
  * generateTrendDiscussion.js
  *
  * Uses OpenAI to generate a list of tech‑trend entries (JSON),
- * then posts them to your GitHub Discussions under the “Tech Trends” category.
+ * then posts them to your GitHub Discussions under the “Tech Trends” category,
+ * authenticating with the built‑in GITHUB_TOKEN.
  *
  * Production‑ready:
  *  • Validates required env vars (fails fast if missing)
@@ -17,37 +18,18 @@
 
 import { OpenAI } from "openai";
 import { Octokit } from "@octokit/rest";
-import { createAppAuth } from "@octokit/auth-app";
 
 // ─── ENVIRONMENT SETUP ─────────────────────────────────────────────────────────
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = (process.env.OPENAI_MODEL || "").trim() || "gpt-4";
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY; // provided by Actions
-const GITHUB_APP_ID = process.env.GITHUB_APP_ID;
-const GITHUB_INSTALLATION_ID = process.env.GITHUB_INSTALLATION_ID;
 
-// Robust PEM handling:
-let APP_PRIVATE_KEY = process.env.APP_PRIVATE_KEY;
-if (!APP_PRIVATE_KEY) {
-  console.error("❌ Missing required environment variable: APP_PRIVATE_KEY");
-  process.exit(1);
-}
-if (APP_PRIVATE_KEY.includes("\\n")) {
-  APP_PRIVATE_KEY = APP_PRIVATE_KEY.replace(/\\n/g, "\n");
-}
-if (!APP_PRIVATE_KEY.startsWith("-----BEGIN")) {
-  console.error(
-    "❌ APP_PRIVATE_KEY is not a valid PEM (doesn't start with -----BEGIN)."
-  );
-  process.exit(1);
-}
-
-// fail fast if any other required var is missing
+// fail fast if any required var is missing
 [
   ["OPENAI_API_KEY", OPENAI_API_KEY],
+  ["GITHUB_TOKEN", GITHUB_TOKEN],
   ["GITHUB_REPOSITORY", GITHUB_REPOSITORY],
-  ["GITHUB_APP_ID", GITHUB_APP_ID],
-  ["GITHUB_INSTALLATION_ID", GITHUB_INSTALLATION_ID],
 ].forEach(([name, val]) => {
   if (!val) {
     console.error(`❌ Missing required environment variable: ${name}`);
@@ -58,6 +40,9 @@ if (!APP_PRIVATE_KEY.startsWith("-----BEGIN")) {
 const [owner, repo] = GITHUB_REPOSITORY.split("/");
 
 // ─── HELPERS ───────────────────────────────────────────────────────────────────
+/**
+ * Retry an async operation on failure with exponential backoff.
+ */
 async function withRetry(fn, retries = 2, delay = 500) {
   try {
     return await fn();
@@ -73,6 +58,9 @@ async function withRetry(fn, retries = 2, delay = 500) {
   }
 }
 
+/**
+ * Generate an array of { title, description } via OpenAI Chat.
+ */
 async function fetchTrends() {
   console.log(`🔍 Generating trends via OpenAI (model=${OPENAI_MODEL})…`);
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -101,7 +89,7 @@ async function fetchTrends() {
   try {
     trends = JSON.parse(raw);
     if (!Array.isArray(trends)) {
-      throw new Error("JSON is not an array");
+      throw new Error("Parsed JSON is not an array");
     }
   } catch (err) {
     console.error("❌ Failed to parse OpenAI JSON response:");
@@ -116,7 +104,7 @@ async function fetchTrends() {
  * Find the “Tech Trends” discussion category ID in this repo.
  */
 async function getDiscussionCategoryId(octokit) {
-  // ⚠️ Note: singular "discussion-categories"
+  // Use the raw REST endpoint
   const { data: categories } = await octokit.request(
     "GET /repos/{owner}/{repo}/discussion-categories",
     { owner, repo }
@@ -125,14 +113,17 @@ async function getDiscussionCategoryId(octokit) {
   const cat = categories.find((c) => c.name === "Tech Trends");
   if (!cat) {
     throw new Error(
-      'Discussion category "Tech Trends" not found. Please create it in your repo settings.'
+      'Discussion category "Tech Trends" not found. Create it in your repo settings.'
     );
   }
   return cat.id;
 }
 
+/**
+ * Post a new discussion with the given markdown body.
+ */
 async function postDiscussion(markdown) {
-  const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+  const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
   const category_id = await getDiscussionCategoryId(octokit);
   const title = `Org Tech Trends — ${new Date().toLocaleDateString("en-US")}`;
@@ -154,6 +145,7 @@ async function postDiscussion(markdown) {
       throw new Error("OpenAI returned an empty list of trends.");
     }
 
+    // Build markdown: each trend as H3 + paragraph, separated by rules
     const markdown = trends
       .map(
         ({ title, description }) =>
