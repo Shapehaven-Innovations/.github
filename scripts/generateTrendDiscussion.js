@@ -133,7 +133,7 @@ async function postDiscussion(markdown) {
   const octokit = new Octokit({
     authStrategy: createAppAuth,
     auth: {
-      appid: Number(GITHUB_APP_ID),
+      appId: Number(GITHUB_APP_ID),
       privateKey: APP_PRIVATE_KEY,
       installationId: Number(GITHUB_INSTALLATION_ID),
     },
