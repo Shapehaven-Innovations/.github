@@ -10,17 +10,18 @@ permissions:
   discussions: write
 
 env:
-  GITHUB_REPOSITORY: ${{ github.repository }}
+  # OpenAI
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }} # optional override
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # built‑in token
+  OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }} # optional override (defaults to "gpt-4")
+
+  # GitHub App ▶︎ these are your secrets named in the repo settings
+  GITHUB_APP_ID: ${{ secrets.SH_APP_ID }}
+  GITHUB_INSTALLATION_ID: ${{ secrets.SH_INSTALLATION_ID }}
+  APP_PRIVATE_KEY: ${{ secrets.SH_PRIVATE_KEY }}
 
 jobs:
   post-tech-trends:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ${{ github.workspace }}
 
     steps:
       - name: Check out code
@@ -30,19 +31,21 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "18"
-          cache: "npm"
-          cache-dependency-path: "package-lock.json"
+          cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
       - name: Generate & post Tech Trends discussion
+        # At this point, process.env.GITHUB_APP_ID, .GITHUB_INSTALLATION_ID
+        # and .APP_PRIVATE_KEY are all defined for the script.
         run: node scripts/generateTrendDiscussion.js
 
-      - name: Success notification
+      - name: Success
         if: ${{ success() }}
-        run: echo "✅ Tech Trends discussion posted."
+        run: echo "✅ Discussion posted by GitHub App."
 
-      - name: Failure notification
+      - name: Failure
         if: ${{ failure() }}
-        run: echo "::error ::❌ Failed to post Tech Trends discussion."
+        run: echo "::error ::❌ Discussion failed — check the logs."

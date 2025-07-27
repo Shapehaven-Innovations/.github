@@ -4,11 +4,7 @@
 /**
  * generateTrendDiscussion.js
  *
- * Production‐ready script to:
- *  1. Generate a list of tech trends via OpenAI Chat.
- *  2. Look up your GitHub App’s installation token for this repo.
- *  3. Find the “Tech Trends” discussion‐category via REST.
- *  4. Create a new discussion in that category as your GitHub App.
+ 
  *
  * Requirements:
  *  • package.json deps: "openai", "@octokit/rest", "@octokit/auth-app"
