@@ -18,7 +18,8 @@
   "homepage": "https://github.com/Shapehaven-Innovations/.github#readme",
   "dependencies": {
     "@octokit/rest": "^19.0.0",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "openai": "^4.11.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
