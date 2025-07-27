@@ -7,11 +7,11 @@
  * then posts them to your GitHub Discussions under the “Tech Trends” category.
  *
  * Production‑ready:
- *  • Validates all required env vars (fails fast if missing)
+ *  • Validates required env vars (fails fast if missing)
  *  • Fallback for OPENAI_MODEL when blank or unset
  *  • Retries transient network errors with exponential back‑off
  *  • Strict JSON parsing & error logging
- *  • Dynamically looks up “Tech Trends” category via repos.listDiscussionCategories
+ *  • Dynamically looks up “Tech Trends” category via raw REST endpoint
  *  • Posts markdown to GitHub Discussions
  */
 
@@ -22,7 +22,7 @@ import { createAppAuth } from "@octokit/auth-app";
 // ─── ENVIRONMENT SETUP ─────────────────────────────────────────────────────────
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = (process.env.OPENAI_MODEL || "").trim() || "gpt-4";
-const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
+const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY; // provided by Actions
 const GITHUB_APP_ID = process.env.GITHUB_APP_ID;
 const GITHUB_INSTALLATION_ID = process.env.GITHUB_INSTALLATION_ID;
 
@@ -42,12 +42,22 @@ if (!APP_PRIVATE_KEY.startsWith("-----BEGIN")) {
   process.exit(1);
 }
 
+// fail fast if any other required var is missing
+[
+  ["OPENAI_API_KEY", OPENAI_API_KEY],
+  ["GITHUB_REPOSITORY", GITHUB_REPOSITORY],
+  ["GITHUB_APP_ID", GITHUB_APP_ID],
+  ["GITHUB_INSTALLATION_ID", GITHUB_INSTALLATION_ID],
+].forEach(([name, val]) => {
+  if (!val) {
+    console.error(`❌ Missing required environment variable: ${name}`);
+    process.exit(1);
+  }
+});
+
 const [owner, repo] = GITHUB_REPOSITORY.split("/");
 
 // ─── HELPERS ───────────────────────────────────────────────────────────────────
-/**
- * Retry an async operation on failure with exponential backoff.
- */
 async function withRetry(fn, retries = 2, delay = 500) {
   try {
     return await fn();
@@ -63,9 +73,6 @@ async function withRetry(fn, retries = 2, delay = 500) {
   }
 }
 
-/**
- * Generate an array of { title, description } via OpenAI Chat.
- */
 async function fetchTrends() {
   console.log(`🔍 Generating trends via OpenAI (model=${OPENAI_MODEL})…`);
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -77,7 +84,7 @@ async function fetchTrends() {
         {
           role: "system",
           content:
-            'You are a helpful assistant. Reply with nothing but a JSON array of objects, each having exactly two keys: "title" and "description".',
+            'You are a helpful assistant. Reply **only** with a JSON array of objects, each with exactly two keys: "title" and "description".',
         },
         {
           role: "user",
@@ -107,26 +114,23 @@ async function fetchTrends() {
 
 /**
  * Find the “Tech Trends” discussion category ID in this repo.
+ * **Fixed endpoint**: must call /discussions/categories, not /discussion-categories.
  */
 async function getDiscussionCategoryId(octokit) {
-  // Use the raw REST endpoint in case the plugin method isn't available
   const { data: categories } = await octokit.request(
-    "GET /repos/{owner}/{repo}/discussion-categories",
+    "GET /repos/{owner}/{repo}/discussions/categories",
     { owner, repo }
   );
 
   const cat = categories.find((c) => c.name === "Tech Trends");
   if (!cat) {
     throw new Error(
-      'Discussion category "Tech Trends" not found. Create it or update the code.'
+      'Discussion category "Tech Trends" not found. Create it in your repo settings.'
     );
   }
   return cat.id;
 }
 
-/**
- * Post a new discussion with the given markdown body.
- */
 async function postDiscussion(markdown) {
   const octokit = new Octokit({
     authStrategy: createAppAuth,
@@ -157,7 +161,6 @@ async function postDiscussion(markdown) {
       throw new Error("OpenAI returned an empty list of trends.");
     }
 
-    // Build markdown: each trend as H3 + paragraph, separated by rules
     const markdown = trends
       .map(
         ({ title, description }) =>
