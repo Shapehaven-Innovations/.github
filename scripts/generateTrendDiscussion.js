@@ -82,12 +82,12 @@ async function fetchTrends() {
         {
           role: "system",
           content:
-            'You are a helpful assistant. Reply **only** with a JSON array of objects, each with keys "title" and "description".',
+            'You are tech reporter. Reply **only** with a JSON array of objects, each with keys "title" and "description" format as a discussion.',
         },
         {
           role: "user",
           content:
-            "List the top 5 upcoming enterprise technology trends as JSON.",
+            "List the top 5 upcoming enterprise technology trends with factual examples for the week as JSON.",
         },
       ],
       temperature: 0.7,
