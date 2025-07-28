@@ -2,7 +2,7 @@
 "use strict";
 
 /**
- * generateTrendDiscussion.js
+ * generateDiscussionPost.js
  *
  * Deps (package.json):
  *   "openai", "@octokit/rest", "@octokit/auth-app"
@@ -22,18 +22,13 @@ import { OpenAI } from "openai";
 import { Octokit } from "@octokit/rest";
 import { createAppAuth } from "@octokit/auth-app";
 
-// ─── ENV VARS & SANITY CHECK ──────────────────────────────────────────────────
+// ─── ENV VARS & SANITY CHECK ──────────────────────────────────────────
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 let OPENAI_MODEL = process.env.OPENAI_MODEL;
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
 const GITHUB_APP_ID = process.env.GITHUB_APP_ID;
 const GITHUB_INSTALLATION_ID = process.env.GITHUB_INSTALLATION_ID;
-
-// handle multi‑line or escaped PEM
-let APP_PRIVATE_KEY = process.env.APP_PRIVATE_KEY;
-if (APP_PRIVATE_KEY?.includes("\\n")) {
-  APP_PRIVATE_KEY = APP_PRIVATE_KEY.replace(/\\n/g, "\n");
-}
+let APP_PRIVATE_KEY = process.env.APP_PRIVATE_KEY?.replace(/\\n/g, "\n");
 
 for (const [name, val] of [
   ["OPENAI_API_KEY", OPENAI_API_KEY],
@@ -56,7 +51,7 @@ if (!owner || !repo) {
   process.exit(1);
 }
 
-// ─── UTIL: retry transient failures ────────────────────────────────────────────
+// ─── UTIL: retry transient failures ──────────────────────────────────────────
 async function withRetry(fn, retries = 2, delay = 500) {
   try {
     return await fn();
@@ -70,9 +65,11 @@ async function withRetry(fn, retries = 2, delay = 500) {
   }
 }
 
-// ─── STEP 1: FETCH TRENDS VIA OPENAI ───────────────────────────────────────────
-async function fetchTrends() {
-  console.log(`🔍 Generating trends via OpenAI (model=${OPENAI_MODEL})…`);
+// ─── STEP 1: GENERATE FULL DISCUSSION MARKDOWN VIA OPENAI ───────────────────
+async function generateDiscussionMarkdown() {
+  console.log(
+    `🔍 Generating weekly tech‑trends discussion via OpenAI (model=${OPENAI_MODEL})…`
+  );
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
   const resp = await withRetry(() =>
@@ -81,37 +78,36 @@ async function fetchTrends() {
       messages: [
         {
           role: "system",
-          content:
-            'You are tech reporter. Reply **only** with a JSON array of objects, each with keys "title" and "description" format as a discussion.',
+          content: [
+            "You are a technology reporter crafting a GitHub Discussion post.",
+            "Produce Markdown for *this week’s* top 5 enterprise technology trends.",
+            "For each trend include:",
+            "- A `###` heading with the trend title",
+            "- A *factual real‑world example* in italics",
+            "- A brief descriptive paragraph",
+            "",
+            "Reply **only** with the Markdown body, no JSON or additional commentary.",
+          ].join("\n"),
         },
         {
           role: "user",
           content:
-            "List the top 5 upcoming enterprise technology trends with factual examples for the week as JSON.",
+            "What are the top 5 enterprise technology trends happening this week?",
         },
       ],
       temperature: 0.7,
-      max_tokens: 500,
+      max_tokens: 800,
     })
   );
 
-  const raw = resp.choices?.[0]?.message?.content?.trim();
-  if (!raw) throw new Error("Empty response from OpenAI");
-
-  let trends;
-  try {
-    trends = JSON.parse(raw);
-  } catch (err) {
-    console.error("❌ Failed to parse OpenAI JSON:", raw);
-    throw err;
+  const markdown = resp.choices?.[0]?.message?.content?.trim();
+  if (!markdown) {
+    throw new Error("Empty response from OpenAI");
   }
-  if (!Array.isArray(trends) || trends.length === 0) {
-    throw new Error("Parsed data is not a non‑empty array");
-  }
-  return trends;
+  return markdown;
 }
 
-// ─── STEP 2: FETCH REPO + CATEGORY VIA GRAPHQL ────────────────────────────────
+// ─── STEP 2: FETCH REPO & CATEGORY VIA GRAPHQL ──────────────────────────────
 async function fetchRepoInfo(octokit) {
   const query = `
     query($owner:String!,$repo:String!) {
@@ -125,15 +121,15 @@ async function fetchRepoInfo(octokit) {
   `;
   const result = await octokit.graphql(query, { owner, repo });
   const repositoryId = result.repository.id;
-  const cats = result.repository.discussionCategories.nodes;
-  const cat = cats.find((c) => c.name === "Tech Trends");
+  const categories = result.repository.discussionCategories.nodes;
+  const cat = categories.find((c) => c.name === "Tech Trends");
   if (!cat) {
     throw new Error('Discussion category "Tech Trends" not found');
   }
   return { repositoryId, categoryId: cat.id };
 }
 
-// ─── STEP 3: CREATE DISCUSSION VIA GRAPHQL AS GITHUB APP ─────────────────────
+// ─── STEP 3: POST THE DISCUSSION ────────────────────────────────────────────
 async function postDiscussion(markdown) {
   const octokit = new Octokit({
     authStrategy: createAppAuth,
@@ -158,22 +154,15 @@ async function postDiscussion(markdown) {
     input: { repositoryId, categoryId, title, body: markdown },
   });
 
-  console.log("✅ Discussion posted by GitHub App:");
+  console.log("✅ Discussion posted:");
   console.log(resp.createDiscussion.discussion.url);
 }
 
-// ─── MAIN ─────────────────────────────────────────────────────────────────────
+// ─── MAIN ─────────────────────────────────────────────────────────────────
 (async () => {
   try {
-    const trends = await fetchTrends();
-    const markdown = trends
-      .map(
-        ({ title, description }) =>
-          `### ${title.trim()}\n\n${description.trim().replace(/\r?\n/g, "\n")}`
-      )
-      .join("\n\n---\n\n");
-
-    console.log("💬 Creating discussion via GraphQL…");
+    const markdown = await generateDiscussionMarkdown();
+    console.log("💬 Posting discussion…");
     await postDiscussion(markdown);
   } catch (err) {
     console.error("❌ Fatal error:", err.message);
