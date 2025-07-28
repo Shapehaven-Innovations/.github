@@ -81,12 +81,16 @@ async function generateDiscussionMarkdown() {
           content: [
             "You are a technology reporter crafting a GitHub Discussion post.",
             "Produce Markdown for *this week’s* top 5 enterprise technology trends.",
-            "For each trend include:",
-            "- A `###` heading with the trend title",
-            "- A *factual real‑world example* in italics",
-            "- A brief descriptive paragraph",
+            "For each trend, include:",
+            "1. A `###` heading with the trend title",
+            "2. A factual real‑world example in italics, followed by a hyperlink to the source, e.g.:",
+            "   _Example: SpaceX’s Starlink deployment_ ([link](https://example.com/starlink-launch))",
+            "3. A **focused description** about that example, covering:",
+            "   - Where the future is headed",
+            "   - Key risks and potential impacts",
+            "   - Strategic partnerships or initiatives driving it",
             "",
-            "Reply **only** with the Markdown body, no JSON or additional commentary.",
+            "Reply **only** with the Markdown body (no JSON, no extra commentary).",
           ].join("\n"),
         },
         {
@@ -96,7 +100,7 @@ async function generateDiscussionMarkdown() {
         },
       ],
       temperature: 0.7,
-      max_tokens: 800,
+      max_tokens: 900,
     })
   );
 
