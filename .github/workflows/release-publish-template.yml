@@ -1,0 +1,62 @@
+name: Release → Build & Publish
+
+on:
+  workflow_call:
+    inputs:
+      bundle_id:
+        required: true
+        type: string
+    secrets:
+      REDDIT_CLIENT_ID:
+        required: true
+      REDDIT_SECRET:
+        required: true
+      REDDIT_USERNAME:
+        required: true
+      REDDIT_PASSWORD:
+        required: true
+      GITHUB_TOKEN:
+        required: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with: python-version: '3.x'
+      - name: Fetch App Store data
+        run: |
+          ./scripts/fetch_app_data.py "${{ inputs.bundle_id }}"
+
+      - name: Build Hugo site
+        uses: peaceiris/actions-hugo@v2
+        with: hugo-version: 'latest'
+      - run: hugo --minify -d public
+
+      - name: Deploy to Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          personal_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: public
+
+      - name: Post to Reddit
+        uses: devops-infra/action-praw@v2
+        with:
+          client_id:     ${{ secrets.REDDIT_CLIENT_ID }}
+          client_secret: ${{ secrets.REDDIT_SECRET }}
+          username:      ${{ secrets.REDDIT_USERNAME }}
+          password:      ${{ secrets.REDDIT_PASSWORD }}
+          subreddit:     your_app_subreddit
+          title:         "🚀 v${{ github.ref_name }} released!"
+          body: |
+            We just shipped v${{ github.ref_name }} of **${{ github.repository }}**.  
+            📖 Release notes: ${{ github.event.release.html_url }}
+
+      - name: Upload log
+        run: echo "Released at $(date -u +"%Y-%m-%dT%H:%M:%SZ")" > release.log
+      - uses: actions/upload-artifact@v3
+        with:
+          name: release-log
+          path: release.log
