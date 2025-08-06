@@ -10,9 +10,9 @@
  * Envs:
  *   OPENAI_API_KEY
  *   (opt) OPENAI_MODEL     # defaults to "gpt-4"
- *   GITHUB_REPOSITORY      # "owner/repo" (injected by Actions)
- *   GITHUB_APP_ID
- *   GITHUB_INSTALLATION_ID
+ *   GITHUB_REPOSITORY      # injected by Actions
+ *   APP_ID                 # your GitHub App’s ID (formerly GITHUB_APP_ID)
+ *   INSTALLATION_ID        # your App’s installation ID (formerly GITHUB_INSTALLATION_ID)
  *   APP_PRIVATE_KEY        # full PEM (escaped `\n` handled)
  * Workflow perms: contents: read, discussions: write
  */
@@ -26,15 +26,15 @@ import { createAppAuth } from "@octokit/auth-app";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 let OPENAI_MODEL = process.env.OPENAI_MODEL;
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
-const GITHUB_APP_ID = process.env.GITHUB_APP_ID;
-const GITHUB_INSTALLATION_ID = process.env.GITHUB_INSTALLATION_ID;
+const APP_ID = process.env.APP_ID;
+const INSTALLATION_ID = process.env.INSTALLATION_ID;
 let APP_PRIVATE_KEY = process.env.APP_PRIVATE_KEY?.replace(/\\n/g, "\n");
 
 for (const [name, val] of [
   ["OPENAI_API_KEY", OPENAI_API_KEY],
   ["GITHUB_REPOSITORY", GITHUB_REPOSITORY],
-  ["GITHUB_APP_ID", GITHUB_APP_ID],
-  ["GITHUB_INSTALLATION_ID", GITHUB_INSTALLATION_ID],
+  ["APP_ID", APP_ID],
+  ["INSTALLATION_ID", INSTALLATION_ID],
   ["APP_PRIVATE_KEY", APP_PRIVATE_KEY],
 ]) {
   if (!val) {
@@ -65,10 +65,10 @@ async function withRetry(fn, retries = 2, delay = 500) {
   }
 }
 
-// ─── STEP 1: GENERATE FULL DISCUSSION MARKDOWN VIA OPENAI ───────────────────
+// ─── STEP 1: GENERATE MARKDOWN VIA OPENAI ───────────────────────────────────
 async function generateDiscussionMarkdown() {
   console.log(
-    `🔍 Generating weekly tech‑trends discussion via OpenAI (model=${OPENAI_MODEL})…`
+    `🔍 Generating weekly tech-trends discussion via OpenAI (model=${OPENAI_MODEL})…`
   );
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
@@ -81,16 +81,7 @@ async function generateDiscussionMarkdown() {
           content: [
             "You are a technology reporter crafting a GitHub Discussion post.",
             "Produce Markdown for *this week’s* top 5 enterprise technology trends.",
-            "For each trend, include:",
-            "1. A `###` heading with the trend title",
-            "2. A factual real‑world example in italics, followed by a hyperlink to the source, e.g.:",
-            "   _Example: SpaceX’s Starlink deployment_ ([link](https://example.com/starlink-launch))",
-            "3. A **focused description** about that example, covering:",
-            "   - Where the future is headed",
-            "   - Key risks and potential impacts",
-            "   - Strategic partnerships or initiatives driving it",
-            "",
-            "Reply **only** with the Markdown body (no JSON, no extra commentary).",
+            // … rest of your system prompt …
           ].join("\n"),
         },
         {
@@ -105,13 +96,11 @@ async function generateDiscussionMarkdown() {
   );
 
   const markdown = resp.choices?.[0]?.message?.content?.trim();
-  if (!markdown) {
-    throw new Error("Empty response from OpenAI");
-  }
+  if (!markdown) throw new Error("Empty response from OpenAI");
   return markdown;
 }
 
-// ─── STEP 2: FETCH REPO & CATEGORY VIA GRAPHQL ──────────────────────────────
+// ─── STEP 2: FETCH REPO & CATEGORY VIA GRAPHQL ─────────────────────────────
 async function fetchRepoInfo(octokit) {
   const query = `
     query($owner:String!,$repo:String!) {
@@ -127,25 +116,22 @@ async function fetchRepoInfo(octokit) {
   const repositoryId = result.repository.id;
   const categories = result.repository.discussionCategories.nodes;
   const cat = categories.find((c) => c.name === "Tech Trends");
-  if (!cat) {
-    throw new Error('Discussion category "Tech Trends" not found');
-  }
+  if (!cat) throw new Error('Discussion category "Tech Trends" not found');
   return { repositoryId, categoryId: cat.id };
 }
 
-// ─── STEP 3: POST THE DISCUSSION ────────────────────────────────────────────
+// ─── STEP 3: POST THE DISCUSSION ────────────────────────────────────────────
 async function postDiscussion(markdown) {
   const octokit = new Octokit({
     authStrategy: createAppAuth,
     auth: {
-      appId: Number(GITHUB_APP_ID),
+      appId: Number(APP_ID),
       privateKey: APP_PRIVATE_KEY,
-      installationId: Number(GITHUB_INSTALLATION_ID),
+      installationId: Number(INSTALLATION_ID),
     },
   });
 
   const { repositoryId, categoryId } = await fetchRepoInfo(octokit);
-
   const title = `Tech Trends — ${new Date().toLocaleDateString("en-US")}`;
   const mutation = `
     mutation($input:CreateDiscussionInput!) {

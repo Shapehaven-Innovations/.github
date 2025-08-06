@@ -1,4 +1,4 @@
-name: "Bi‑Weekly Org Tech Trends"
+name: "Bi-Weekly Org Tech Trends"
 
 on:
   workflow_dispatch:
@@ -12,35 +12,30 @@ permissions:
 env:
   # OpenAI
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }} # optional override (defaults to "gpt-4")
+  OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }} # optional override
 
-  # GitHub App ▶︎ these are your secrets named in the repo settings
-  GITHUB_APP_ID: ${{ secrets.SH_APP_ID }}
-  GITHUB_INSTALLATION_ID: ${{ secrets.SH_INSTALLATION_ID }}
-  APP_PRIVATE_KEY: ${{ secrets.SH_PRIVATE_KEY }}
+  # GitHub App (no GITHUB_* prefixes)
+  APP_ID: ${{ secrets.APP_ID }}
+  INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
+  APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
 
 jobs:
   post-tech-trends:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Node.js (with npm cache)
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
 
       - name: Generate & post Tech Trends discussion
-        # At this point, process.env.GITHUB_APP_ID, .GITHUB_INSTALLATION_ID
-        # and .APP_PRIVATE_KEY are all defined for the script.
-        run: node scripts/generateTrendDiscussion.js
+        run: node scripts/generateDiscussionPost.js
 
       - name: Success
         if: ${{ success() }}
