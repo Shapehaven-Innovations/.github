@@ -154,8 +154,8 @@ async function generateDiscussionMarkdown() {
   const resp = await withRetry(() =>
     openai.chat.completions.create({
       model: OPENAI_MODEL,
-      temperature: 0.7,
-      max_tokens: 900,
+      temperature: 0.8,
+      max_tokens: 950,
       messages: [
         {
           role: "system",
@@ -169,8 +169,8 @@ async function generateDiscussionMarkdown() {
             "3. A focused description covering:",
             "   - Future direction",
             "   - Key risks & impacts",
-            "   - Strategic partnerships,",
-            "   - Initiatives,",
+            "   - Strategic partnerships",
+            "   - Initiatives",
             "",
             "Reply ONLY with Markdown (no JSON, no commentary).",
           ].join("\n"),
