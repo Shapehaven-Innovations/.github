@@ -5,30 +5,35 @@
  * generateDiscussionPost.js
  *
  * Deps (package.json):
- *   "openai", "@octokit/rest", "@octokit/auth-app"
+ *   "openai", "@octokit/rest", "@octokit/auth-app", "node-fetch"
  * ESM: "type":"module"
  * Envs:
  *   OPENAI_API_KEY
  *   (opt) OPENAI_MODEL     # defaults to "gpt-4"
- *   GITHUB_REPOSITORY      # injected by Actions
- *   APP_ID                 # your GitHub App’s ID (formerly GITHUB_APP_ID)
- *   INSTALLATION_ID        # your App’s installation ID (formerly GITHUB_INSTALLATION_ID)
+ *   GITHUB_REPOSITORY      # "owner/repo" (injected by Actions)
+ *   APP_ID
+ *   INSTALLATION_ID
  *   APP_PRIVATE_KEY        # full PEM (escaped `\n` handled)
- * Workflow perms: contents: read, discussions: write
  */
 
 import process from "process";
+import fetch from "node-fetch";
 import { OpenAI } from "openai";
 import { Octokit } from "@octokit/rest";
 import { createAppAuth } from "@octokit/auth-app";
 
 // ─── ENV VARS & SANITY CHECK ──────────────────────────────────────────
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-let OPENAI_MODEL = process.env.OPENAI_MODEL;
-const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
-const APP_ID = process.env.APP_ID;
-const INSTALLATION_ID = process.env.INSTALLATION_ID;
-let APP_PRIVATE_KEY = process.env.APP_PRIVATE_KEY?.replace(/\\n/g, "\n");
+const {
+  OPENAI_API_KEY,
+  OPENAI_MODEL: _OPENAI_MODEL,
+  GITHUB_REPOSITORY,
+  APP_ID,
+  INSTALLATION_ID,
+  APP_PRIVATE_KEY: rawPrivateKey,
+} = process.env;
+
+let OPENAI_MODEL = _OPENAI_MODEL?.trim() || "gpt-4";
+const APP_PRIVATE_KEY = rawPrivateKey?.replace(/\\n/g, "\n");
 
 for (const [name, val] of [
   ["OPENAI_API_KEY", OPENAI_API_KEY],
@@ -43,8 +48,6 @@ for (const [name, val] of [
   }
 }
 
-if (!OPENAI_MODEL?.trim()) OPENAI_MODEL = "gpt-4";
-
 const [owner, repo] = GITHUB_REPOSITORY.split("/");
 if (!owner || !repo) {
   console.error(`❌ Invalid GITHUB_REPOSITORY, must be "owner/repo"`);
@@ -57,24 +60,24 @@ async function withRetry(fn, retries = 2, delay = 500) {
     return await fn();
   } catch (err) {
     if (retries > 0) {
-      console.warn(`⚠️  Retry in ${delay}ms after error: ${err.message}`);
-      await new Promise((r) => setTimeout(r, delay));
+      console.warn(`⚠️  retry in ${delay}ms after error: ${err.message}`);
+      await new Promise((res) => setTimeout(res, delay));
       return withRetry(fn, retries - 1, delay * 2);
     }
     throw err;
   }
 }
 
-// ─── STEP 1: GENERATE MARKDOWN VIA OPENAI ───────────────────────────────────
+// ─── STEP 1: GENERATE FULL DISCUSSION MD VIA OPENAI ─────────────────────────
 async function generateDiscussionMarkdown() {
-  console.log(
-    `🔍 Generating weekly tech-trends discussion via OpenAI (model=${OPENAI_MODEL})…`
-  );
+  console.log(`🔍 Generating discussion via OpenAI (model=${OPENAI_MODEL})…`);
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
   const resp = await withRetry(() =>
     openai.chat.completions.create({
       model: OPENAI_MODEL,
+      temperature: 0.7,
+      max_tokens: 900,
       messages: [
         {
           role: "system",
@@ -83,14 +86,15 @@ async function generateDiscussionMarkdown() {
             "Produce Markdown for *this week’s* top 5 enterprise technology trends.",
             "For each trend, include:",
             "1. A `###` heading with the trend title",
-            "2. A factual real‑world example in italics, followed by a hyperlink to the source, e.g.:",
-            "   _Example: SpaceX’s Starlink deployment_ ([link](https://example.com/starlink-launch))",
-            "3. A **focused description** about that example, covering:",
+            "2. A factual real-world _example_ in italics followed by a hyperlink to the **original source**.",
+            "   - **ONLY** use links from these domains: arxiv.org, ieeexplore.ieee.org, dl.acm.org, nist.gov, developer/vendor whitepapers (e.g., cloud.google.com, aws.amazon.com).",
+            "   - **Ensure** every URL is valid (status 200).",
+            "3. A **focused description** covering:",
             "   - Where the future is headed",
-            "   - Key risks and potential impacts",
+            "   - Key risks & potential impacts",
             "   - Strategic partnerships or initiatives driving it",
             "",
-            "Reply **only** with the Markdown body (no JSON, no extra commentary).",
+            "Reply **only** with pure Markdown (no JSON, no commentary).",
           ].join("\n"),
         },
         {
@@ -99,8 +103,6 @@ async function generateDiscussionMarkdown() {
             "What are the top 5 enterprise technology trends happening this week?",
         },
       ],
-      temperature: 0.7,
-      max_tokens: 900,
     })
   );
 
@@ -109,7 +111,40 @@ async function generateDiscussionMarkdown() {
   return markdown;
 }
 
-// ─── STEP 2: FETCH REPO & CATEGORY VIA GRAPHQL ─────────────────────────────
+// ─── VALIDATE: ensure no 404s ───────────────────────────────────────────────
+async function validateLinks(markdown) {
+  const urlRegex = /\[.*?\]\((https?:\/\/[^\s)]+)\)/g;
+  const invalid = [];
+  let match;
+  while ((match = urlRegex.exec(markdown))) {
+    const url = match[1];
+    try {
+      const res = await fetch(url, { method: "HEAD" });
+      if (!res.ok) invalid.push(url);
+    } catch {
+      invalid.push(url);
+    }
+  }
+  if (invalid.length) {
+    console.error("❌ Invalid links detected:", invalid);
+    return false;
+  }
+  return true;
+}
+
+// ─── WRAP: retry generation until links are valid ──────────────────────────
+async function generateValidDiscussion(maxAttempts = 3) {
+  for (let i = 1; i <= maxAttempts; i++) {
+    const md = await generateDiscussionMarkdown();
+    if (await validateLinks(md)) return md;
+    console.warn(`⚠️  Attempt ${i} had bad links — regenerating…`);
+  }
+  throw new Error(
+    `Failed to generate discussion with all valid links after ${maxAttempts} attempts`
+  );
+}
+
+// ─── STEP 2: FETCH REPO & CATEGORY VIA GRAPHQL ──────────────────────────────
 async function fetchRepoInfo(octokit) {
   const query = `
     query($owner:String!,$repo:String!) {
@@ -123,8 +158,9 @@ async function fetchRepoInfo(octokit) {
   `;
   const result = await octokit.graphql(query, { owner, repo });
   const repositoryId = result.repository.id;
-  const categories = result.repository.discussionCategories.nodes;
-  const cat = categories.find((c) => c.name === "Tech Trends");
+  const cat = result.repository.discussionCategories.nodes.find(
+    (c) => c.name === "Tech Trends"
+  );
   if (!cat) throw new Error('Discussion category "Tech Trends" not found');
   return { repositoryId, categoryId: cat.id };
 }
@@ -153,14 +189,14 @@ async function postDiscussion(markdown) {
     input: { repositoryId, categoryId, title, body: markdown },
   });
 
-  console.log("✅ Discussion posted:");
-  console.log(resp.createDiscussion.discussion.url);
+  console.log("✅ Discussion posted at:", resp.createDiscussion.discussion.url);
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────
 (async () => {
   try {
-    const markdown = await generateDiscussionMarkdown();
+    console.log("💬 Generating & validating discussion…");
+    const markdown = await generateValidDiscussion();
     console.log("💬 Posting discussion…");
     await postDiscussion(markdown);
   } catch (err) {
