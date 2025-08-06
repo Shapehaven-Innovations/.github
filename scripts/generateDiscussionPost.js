@@ -23,7 +23,8 @@ import { OpenAI } from "openai";
 import { Octokit } from "@octokit/rest";
 import { createAppAuth } from "@octokit/auth-app";
 
-// ─── ENV VARS & SETUP ─────────────────────────────────────────────────────
+// ─── CONFIGURATION ────────────────────────────────────────────────────────
+const NUM_TRENDS = 5;
 const {
   OPENAI_API_KEY,
   OPENAI_MODEL: _OPENAI_MODEL,
@@ -53,7 +54,7 @@ if (!owner || !repo) {
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-// ─── HELPERS ──────────────────────────────────────────────────────────────
+// ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────
 async function withRetry(fn, retries = 2, delay = 500) {
   try {
     return await fn();
@@ -66,28 +67,25 @@ async function withRetry(fn, retries = 2, delay = 500) {
   }
 }
 
-// Check HEAD, fall back to GET
 async function isUrlAlive(url) {
   try {
-    const h = await fetch(url, { method: "HEAD" });
-    if (h.ok) return true;
+    const head = await fetch(url, { method: "HEAD" });
+    if (head.ok) return true;
   } catch {}
   try {
-    const g = await fetch(url, { method: "GET" });
-    return g.ok;
+    const get = await fetch(url, { method: "GET" });
+    return get.ok;
   } catch {
     return false;
   }
 }
 
-// Ask OpenAI for an alternative working link
-async function getReplacementLink(text) {
+async function getReplacementLink(exampleTitle) {
   const prompt = `
-You provided this example text: "${text}"
-The original link is broken or missing.  
-Please give me a working URL from one of these domains that best matches the example:
-arxiv.org, ieeexplore.ieee.org, dl.acm.org, nist.gov, cloud.google.com, aws.amazon.com.  
-Reply only with a single HTTPS URL.
+The link for "${exampleTitle}" is broken. 
+Please provide a working HTTPS URL from one of these domains that best matches it:
+arxiv.org, ieeexplore.ieee.org, dl.acm.org, nist.gov.
+Reply ONLY with the URL.
 `;
   const resp = await withRetry(() =>
     openai.chat.completions.create({
@@ -98,98 +96,117 @@ Reply only with a single HTTPS URL.
         {
           role: "system",
           content:
-            "You are a helpful assistant that finds authoritative technical links.",
+            "You are a strict assistant providing only valid technical URLs.",
         },
         { role: "user", content: prompt.trim() },
       ],
     })
   );
-  const url = resp.choices?.[0]?.message?.content?.trim();
-  return url && url.startsWith("http") ? url : null;
+  const url = resp.choices?.[0]?.message?.content.trim();
+  return url?.startsWith("http") ? url : null;
 }
 
-// Replace broken links in the markdown
-async function sanitizeAndReplaceLinks(markdown) {
-  const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
-  let result = markdown;
-  const seen = new Set();
-
-  for (const [, text, url] of markdown.matchAll(linkRegex)) {
-    if (seen.has(url)) continue;
-    seen.add(url);
-
-    if (!(await isUrlAlive(url))) {
-      console.warn(`⚠️  Broken link detected: ${url}`);
-      const replacement = await getReplacementLink(text);
-      if (replacement) {
-        console.log(`🔗 Replacing with: ${replacement}`);
-        // escape for RegExp
-        const escText = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const escUrl = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        result = result.replace(
-          new RegExp(`\\[${escText}\\]\\(${escUrl}\\)`, "g"),
-          `[${text}](${replacement})`
-        );
-      } else {
-        console.warn(`❌ No replacement found for "${text}", stripping link.`);
-        result = result.replace(
-          new RegExp(
-            `\\[${text.replace(
-              /[.*+?^${}()|[\]\\]/g,
-              "\\$&"
-            )}\\]\\(${url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
-            "g"
-          ),
-          text
-        );
-      }
-    }
-  }
-  return result;
-}
-
-// ─── STEP 1: GENERATE RAW DISCUSSION ──────────────────────────────────────
-async function generateDiscussionMarkdown() {
-  console.log(`🔍 Generating discussion via OpenAI (model=${OPENAI_MODEL})…`);
+// Fetch N trends in JSON form
+async function fetchTrendCandidates(count) {
+  const system = `
+You are an enterprise technology reporter. 
+Output a JSON array of exactly ${count} objects, each with:
+- "title": short trend title
+- "exampleTitle": italicized real-world example name
+- "url": HTTPS link from one of these vetted domains: arxiv.org, ieeexplore.ieee.org, dl.acm.org, nist.gov.
+- "description": 5–7 sentences covering future direction, key risks, partnerships, initiatives.
+Reply ONLY with JSON.`;
+  const user = `List the top ${count} enterprise technology trends happening this week.`;
   const resp = await withRetry(() =>
     openai.chat.completions.create({
       model: OPENAI_MODEL,
-      temperature: 0.8,
-      max_tokens: 950,
+      temperature: 0.7,
+      max_tokens: 1200,
       messages: [
-        {
-          role: "system",
-          content: [
-            "You are a technology reporter crafting a GitHub Discussion post.",
-            "Produce Markdown for *this week’s* top 5 enterprise technology trends.",
-            "Each trend must include:",
-            "1. A `###` heading with the trend title",
-            "2. A factual real-world _example_ in italics with a hyperlink to the source",
-            "   - Only use vetted domains: arxiv.org, ieeexplore.ieee.org, dl.acm.org, nist.gov, cloud provider whitepapers.",
-            "3. A focused description covering:",
-            "   - Future direction",
-            "   - Key risks & impacts",
-            "   - Strategic partnerships",
-            "   - Initiatives",
-            "",
-            "Reply ONLY with Markdown (no JSON, no commentary).",
-          ].join("\n"),
-        },
-        {
-          role: "user",
-          content:
-            "What are the top 5 enterprise technology trends happening this week?",
-        },
+        { role: "system", content: system.trim() },
+        { role: "user", content: user },
       ],
     })
   );
-
-  const md = resp.choices?.[0]?.message?.content?.trim();
-  if (!md) throw new Error("Empty response from OpenAI");
-  return md;
+  try {
+    return JSON.parse(resp.choices[0].message.content);
+  } catch {
+    throw new Error("❌ Failed to parse JSON from OpenAI response.");
+  }
 }
 
-// ─── STEP 2: FETCH CATEGORY ID ───────────────────────────────────────────
+// Fetch one additional trend if any candidate fails entirely
+async function fetchAdditionalTrend() {
+  const system = `
+You are an enterprise technology reporter. 
+Output ONE JSON object with the same schema:
+{"title","exampleTitle","url","description"} 
+ensuring the URL is from a vetted domain. Reply ONLY with JSON.`;
+  const user = "Provide one more enterprise technology trend.";
+  const resp = await withRetry(() =>
+    openai.chat.completions.create({
+      model: OPENAI_MODEL,
+      temperature: 0.7,
+      max_tokens: 500,
+      messages: [
+        { role: "system", content: system.trim() },
+        { role: "user", content: user },
+      ],
+    })
+  );
+  try {
+    return JSON.parse(resp.choices[0].message.content);
+  } catch {
+    throw new Error("❌ Failed to parse additional trend JSON.");
+  }
+}
+
+function toMarkdown({ title, exampleTitle, url, description }) {
+  return `### ${title}
+
+*_${exampleTitle}_*  
+${description.trim()}`;
+}
+
+// Assemble exactly NUM_TRENDS valid trends
+async function assembleValidTrends() {
+  const raw = await fetchTrendCandidates(NUM_TRENDS);
+  const valid = [];
+
+  for (const item of raw) {
+    if (await isUrlAlive(item.url)) {
+      valid.push(item);
+    } else {
+      console.warn(`⚠️ Broken link for "${item.exampleTitle}": ${item.url}`);
+      const replacement = await getReplacementLink(item.exampleTitle);
+      if (replacement && (await isUrlAlive(replacement))) {
+        console.log(`🔗 Replaced with: ${replacement}`);
+        item.url = replacement;
+        valid.push(item);
+      } else {
+        console.warn(
+          `❌ No replacement for "${item.title}", fetching a new trend`
+        );
+        const extra = await fetchAdditionalTrend();
+        if (await isUrlAlive(extra.url)) {
+          valid.push(extra);
+        }
+      }
+    }
+    if (valid.length >= NUM_TRENDS) break;
+  }
+
+  // If still short, keep fetching
+  while (valid.length < NUM_TRENDS) {
+    console.log("🔄 Fetching supplemental trend…");
+    const extra = await fetchAdditionalTrend();
+    if (await isUrlAlive(extra.url)) valid.push(extra);
+  }
+
+  return valid.slice(0, NUM_TRENDS).map(toMarkdown).join("\n\n");
+}
+
+// ─── STEP 2: FETCH GITHUB DISCUSSION CATEGORY ─────────────────────────────
 async function fetchCategory(octokit) {
   const query = `
     query($owner:String!,$repo:String!) {
@@ -197,8 +214,7 @@ async function fetchCategory(octokit) {
         id
         discussionCategories(first:20) { nodes { id name } }
       }
-    }
-  `;
+    }`;
   const result = await octokit.graphql(query, { owner, repo });
   const cat = result.repository.discussionCategories.nodes.find(
     (c) => c.name === "Tech Trends"
@@ -207,7 +223,7 @@ async function fetchCategory(octokit) {
   return { repositoryId: result.repository.id, categoryId: cat.id };
 }
 
-// ─── STEP 3: POST DISCUSSION ─────────────────────────────────────────────
+// ─── STEP 3: POST TO GITHUB DISCUSSIONS ──────────────────────────────────
 async function postDiscussion(markdown) {
   const octokit = new Octokit({
     authStrategy: createAppAuth,
@@ -217,31 +233,27 @@ async function postDiscussion(markdown) {
       installationId: Number(INSTALLATION_ID),
     },
   });
-
   const { repositoryId, categoryId } = await fetchCategory(octokit);
   const title = `Tech Trends — ${new Date().toLocaleDateString("en-US")}`;
-
   const mutation = `
-    mutation($input:CreateDiscussionInput!) {
+    mutation($input: CreateDiscussionInput!) {
       createDiscussion(input:$input) { discussion { url } }
-    }
-  `;
+    }`;
 
   const resp = await octokit.graphql(mutation, {
     input: { repositoryId, categoryId, title, body: markdown },
   });
-
-  console.log("✅ Posted:", resp.createDiscussion.discussion.url);
+  console.log("✅ Posted at:", resp.createDiscussion.discussion.url);
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────
 (async () => {
   try {
-    const rawMd = await generateDiscussionMarkdown();
-    const finalMd = await sanitizeAndReplaceLinks(rawMd);
-    await postDiscussion(finalMd);
+    console.log("🔍 Building valid trends…");
+    const md = await assembleValidTrends();
+    await postDiscussion(md);
   } catch (err) {
-    console.error("❌ Fatal:", err.message);
+    console.error("❌ Fatal:", err);
     process.exit(1);
   }
 })();
