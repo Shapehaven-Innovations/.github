@@ -167,9 +167,7 @@ async function postDiscussion(markdown) {
   });
 
   const { repositoryId, categoryId } = await fetchCategory(octokit);
-  const title = `Enterprise Tech Trends — ${new Date().toLocaleDateString(
-    "en-US"
-  )}`;
+  const title = `Tech Trends — ${new Date().toLocaleDateString("en-US")}`;
   const mutation = `
     mutation($input:CreateDiscussionInput!) {
       createDiscussion(input:$input) { discussion { url } }
