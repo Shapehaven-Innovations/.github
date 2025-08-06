@@ -1,29 +1,14 @@
 #!/usr/bin/env node
 "use strict";
 
-/**
- * scripts/generateDiscussionPost.js
- *
- * Deps (package.json):
- *   "openai", "@octokit/rest", "@octokit/auth-app", "node-fetch"
- * ESM: "type":"module"
- * Envs:
- *   OPENAI_API_KEY
- *   (opt) OPENAI_MODEL       # defaults to "gpt-4"
- *   GITHUB_REPOSITORY        # "owner/repo"
- *   APP_ID                   # GitHub App ID
- *   INSTALLATION_ID          # GitHub App installation ID
- *   APP_PRIVATE_KEY          # full PEM, escaped `\n` handled
- * Workflow perms: contents: read, discussions: write
- */
-
 import process from "process";
 import fetch from "node-fetch";
+import { parseStringPromise } from "xml2js";
 import { OpenAI } from "openai";
 import { Octokit } from "@octokit/rest";
 import { createAppAuth } from "@octokit/auth-app";
 
-// ─── CONFIGURATION ────────────────────────────────────────────────────────
+// ─── CONFIG ───────────────────────────────────────────────────────────────
 const NUM_TRENDS = 5;
 const {
   OPENAI_API_KEY,
@@ -51,10 +36,9 @@ if (!owner || !repo) {
   console.error(`❌ Invalid GITHUB_REPOSITORY, must be "owner/repo"`);
   process.exit(1);
 }
-
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-// ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────
+// ─── HELPERS ──────────────────────────────────────────────────────────────
 async function withRetry(fn, retries = 2, delay = 500) {
   try {
     return await fn();
@@ -69,144 +53,93 @@ async function withRetry(fn, retries = 2, delay = 500) {
 
 async function isUrlAlive(url) {
   try {
-    const head = await fetch(url, { method: "HEAD" });
-    if (head.ok) return true;
+    const res = await fetch(url, { method: "HEAD" });
+    if (res.ok) return true;
   } catch {}
   try {
-    const get = await fetch(url, { method: "GET" });
-    return get.ok;
+    const res = await fetch(url, { method: "GET" });
+    return res.ok;
   } catch {
     return false;
   }
 }
 
-async function getReplacementLink(exampleTitle) {
+// fetch and parse Google News RSS for “enterprise technology”
+async function fetchGoogleNewsHeadlines() {
+  const RSS_URL =
+    "https://news.google.com/rss/search?q=enterprise+technology&hl=en-US&gl=US&ceid=US:en";
+  const xml = await withRetry(() => fetch(RSS_URL).then((r) => r.text()));
+  const json = await parseStringPromise(xml);
+  const items = json.rss.channel[0].item.slice(0, NUM_TRENDS);
+  return items.map((i) => ({
+    title: i.title[0],
+    url: i.link[0],
+  }));
+}
+
+// ask OpenAI to generate a 2–4 sentence write-up
+async function summarizeTrend({ title, url }) {
   const prompt = `
-The link for "${exampleTitle}" is broken. 
-Please provide a working HTTPS URL from one of these domains that best matches it:
-arxiv.org, ieeexplore.ieee.org, dl.acm.org, nist.gov.
-Reply ONLY with the URL.
-`;
+You are a technology reporter. 
+Write a concise 2–4 sentence enterprise-tech trend summary for the article at:
+Title: "${title}"
+URL: ${url}
+
+Include:
+- future direction
+- key risks & impacts
+- strategic partnerships
+- initiatives
+Reply ONLY with the summary.`;
   const resp = await withRetry(() =>
     openai.chat.completions.create({
       model: OPENAI_MODEL,
-      temperature: 0.0,
-      max_tokens: 60,
+      temperature: 0.7,
+      max_tokens: 200,
       messages: [
-        {
-          role: "system",
-          content:
-            "You are a strict assistant providing only valid technical URLs.",
-        },
+        { role: "system", content: "You are a concise tech journalist." },
         { role: "user", content: prompt.trim() },
       ],
     })
   );
-  const url = resp.choices?.[0]?.message?.content.trim();
-  return url?.startsWith("http") ? url : null;
+  return resp.choices[0].message.content.trim();
 }
 
-// Fetch N trends in JSON form
-async function fetchTrendCandidates(count) {
-  const system = `
-You are an enterprise technology reporter. 
-Output a JSON array of exactly ${count} objects, each with:
-- "title": short trend title
-- "exampleTitle": italicized real-world example name
-- "url": HTTPS link from one of these vetted domains: arxiv.org, ieeexplore.ieee.org, dl.acm.org, nist.gov.
-- "description": 5–7 sentences covering future direction, key risks, partnerships, initiatives.
-Reply ONLY with JSON.`;
-  const user = `List the top ${count} enterprise technology trends happening this week.`;
-  const resp = await withRetry(() =>
-    openai.chat.completions.create({
-      model: OPENAI_MODEL,
-      temperature: 0.7,
-      max_tokens: 1200,
-      messages: [
-        { role: "system", content: system.trim() },
-        { role: "user", content: user },
-      ],
-    })
-  );
-  try {
-    return JSON.parse(resp.choices[0].message.content);
-  } catch {
-    throw new Error("❌ Failed to parse JSON from OpenAI response.");
-  }
+function toMarkdown(index, { title, url, summary }) {
+  return `### ${index + 1}. ${title}
+
+*_[Read the full article](${url})_*
+
+${summary}`;
 }
 
-// Fetch one additional trend if any candidate fails entirely
-async function fetchAdditionalTrend() {
-  const system = `
-You are an enterprise technology reporter. 
-Output ONE JSON object with the same schema:
-{"title","exampleTitle","url","description"} 
-ensuring the URL is from a vetted domain. Reply ONLY with JSON.`;
-  const user = "Provide one more enterprise technology trend.";
-  const resp = await withRetry(() =>
-    openai.chat.completions.create({
-      model: OPENAI_MODEL,
-      temperature: 0.7,
-      max_tokens: 500,
-      messages: [
-        { role: "system", content: system.trim() },
-        { role: "user", content: user },
-      ],
-    })
-  );
-  try {
-    return JSON.parse(resp.choices[0].message.content);
-  } catch {
-    throw new Error("❌ Failed to parse additional trend JSON.");
-  }
-}
-
-function toMarkdown({ title, exampleTitle, url, description }) {
-  return `### ${title}
-
-*_${exampleTitle}_*  
-${description.trim()}`;
-}
-
-// Assemble exactly NUM_TRENDS valid trends
+// ─── ASSEMBLE & SANITIZE ─────────────────────────────────────────────────
 async function assembleValidTrends() {
-  const raw = await fetchTrendCandidates(NUM_TRENDS);
-  const valid = [];
+  const raw = await fetchGoogleNewsHeadlines();
+  const mdBlocks = [];
 
-  for (const item of raw) {
-    if (await isUrlAlive(item.url)) {
-      valid.push(item);
-    } else {
-      console.warn(`⚠️ Broken link for "${item.exampleTitle}": ${item.url}`);
-      const replacement = await getReplacementLink(item.exampleTitle);
-      if (replacement && (await isUrlAlive(replacement))) {
-        console.log(`🔗 Replaced with: ${replacement}`);
-        item.url = replacement;
-        valid.push(item);
-      } else {
-        console.warn(
-          `❌ No replacement for "${item.title}", fetching a new trend`
-        );
-        const extra = await fetchAdditionalTrend();
-        if (await isUrlAlive(extra.url)) {
-          valid.push(extra);
-        }
-      }
+  for (let i = 0; i < raw.length; i++) {
+    const { title, url } = raw[i];
+
+    if (!(await isUrlAlive(url))) {
+      console.warn(`⚠️  Skipping dead link: ${url}`);
+      continue;
     }
-    if (valid.length >= NUM_TRENDS) break;
+
+    const summary = await summarizeTrend({ title, url });
+    mdBlocks.push(toMarkdown(i, { title, url, summary }));
+
+    if (mdBlocks.length >= NUM_TRENDS) break;
   }
 
-  // If still short, keep fetching
-  while (valid.length < NUM_TRENDS) {
-    console.log("🔄 Fetching supplemental trend…");
-    const extra = await fetchAdditionalTrend();
-    if (await isUrlAlive(extra.url)) valid.push(extra);
+  if (mdBlocks.length < NUM_TRENDS) {
+    throw new Error(`Only found ${mdBlocks.length} live trends – aborting.`);
   }
 
-  return valid.slice(0, NUM_TRENDS).map(toMarkdown).join("\n\n");
+  return mdBlocks.join("\n\n");
 }
 
-// ─── STEP 2: FETCH GITHUB DISCUSSION CATEGORY ─────────────────────────────
+// ─── GITHUB DISCUSSION SETUP ──────────────────────────────────────────────
 async function fetchCategory(octokit) {
   const query = `
     query($owner:String!,$repo:String!) {
@@ -223,7 +156,6 @@ async function fetchCategory(octokit) {
   return { repositoryId: result.repository.id, categoryId: cat.id };
 }
 
-// ─── STEP 3: POST TO GITHUB DISCUSSIONS ──────────────────────────────────
 async function postDiscussion(markdown) {
   const octokit = new Octokit({
     authStrategy: createAppAuth,
@@ -233,27 +165,32 @@ async function postDiscussion(markdown) {
       installationId: Number(INSTALLATION_ID),
     },
   });
+
   const { repositoryId, categoryId } = await fetchCategory(octokit);
-  const title = `Tech Trends — ${new Date().toLocaleDateString("en-US")}`;
+  const title = `Enterprise Tech Trends — ${new Date().toLocaleDateString(
+    "en-US"
+  )}`;
   const mutation = `
-    mutation($input: CreateDiscussionInput!) {
+    mutation($input:CreateDiscussionInput!) {
       createDiscussion(input:$input) { discussion { url } }
     }`;
 
   const resp = await octokit.graphql(mutation, {
     input: { repositoryId, categoryId, title, body: markdown },
   });
-  console.log("✅ Posted at:", resp.createDiscussion.discussion.url);
+
+  console.log("✅ Posted:", resp.createDiscussion.discussion.url);
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────
 (async () => {
   try {
-    console.log("🔍 Building valid trends…");
+    console.log("🔍 Fetching top enterprise-tech headlines…");
     const md = await assembleValidTrends();
+    console.log("📝 Generated Markdown:\n", md);
     await postDiscussion(md);
   } catch (err) {
-    console.error("❌ Fatal:", err);
+    console.error("❌ Fatal:", err.message);
     process.exit(1);
   }
 })();
