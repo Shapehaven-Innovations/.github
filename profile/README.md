@@ -1,10 +1,4 @@
-<div align="center">
 
-<a href="https://shapehaveninnovations.com">
-  <img src="https://shapehaveninnovations.com/images/logo.png" alt="ShapeHaven Innovations" width="96" height="96" />
-</a>
-
-# ShapeHaven Innovations
 
 **Software research and solutions that put simplicity first.**
 
