@@ -1,5 +1,3 @@
-
-
 **Software research and solutions that put simplicity first.**
 
 [Website](https://shapehaveninnovations.com) · [Blog](https://shapehaveninnovations.com/blog) · [Support](https://shapehaveninnovations.com/support) · [Email](mailto:info@shapehaveninnovations.com)
@@ -19,6 +17,7 @@ We build iOS apps, websites and backends, modernize legacy code, and run our own
 | <img src="https://shapehaveninnovations.com/images/apps/condoguard.png" width="40" alt="" /> | [**CondoGuard**](https://condoguard.app/) | Condo and property management |
 | <img src="https://shapehaveninnovations.com/images/apps/kavacrawl.png" width="40" alt="" /> | [**KavaCrawl**](https://kavacrawl.shapehaveninnovations.com/) | Discovery and Entertainment |
 | <img src="https://shapehaveninnovations.com/images/apps/mdnsshark.png" width="40" alt="" /> | [**mDNSShark**](https://mdnsshark.shapehaveninnovations.com/) | mDNS and Bonjour service discovery |
+| <img src="https://shapehaveninnovations.com/images/apps/rhythmx.png" width="40" alt="" /> | [**RhythmX**](https://rhythmx.shapehaveninnovations.com/) | Private cycle tracking for iPhone |
 
 ## Services
 
