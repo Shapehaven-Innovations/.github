@@ -13,11 +13,11 @@ We build iOS apps, websites and backends, modernize legacy code, and run our own
 
 | | Product | What it does |
 | :-: | --- | --- |
-| <img src="https://shapehaveninnovations.com/images/apps/returniq.png" width="40" alt="" /> | [**ReturnIQ**](https://returniq.shapehaveninnovations.com/) | Shopify returns management and analytics |
-| <img src="https://shapehaveninnovations.com/images/apps/condoguard.png" width="40" alt="" /> | [**CondoGuard**](https://condoguard.app/) | Condo and property management |
-| <img src="https://shapehaveninnovations.com/images/apps/kavacrawl.png" width="40" alt="" /> | [**KavaCrawl**](https://kavacrawl.shapehaveninnovations.com/) | Discovery and Entertainment |
-| <img src="https://shapehaveninnovations.com/images/apps/mdnsshark.png" width="40" alt="" /> | [**mDNSShark**](https://mdnsshark.shapehaveninnovations.com/) | mDNS and Bonjour service discovery |
-| <img src="https://shapehaveninnovations.com/images/apps/rhythmx.png" width="40" alt="" /> | [**RhythmX**](https://rhythmx.shapehaveninnovations.com/) | Private cycle tracking for iPhone |
+| <img src="https://shapehaveninnovations.com/images/apps/rounded/returniq.png" width="40" alt="" /> | [**ReturnIQ**](https://returniq.shapehaveninnovations.com/) | Shopify returns management and analytics |
+| <img src="https://shapehaveninnovations.com/images/apps/rounded/condoguard.png" width="40" alt="" /> | [**CondoGuard**](https://condoguard.app/) | Condo and property management |
+| <img src="https://shapehaveninnovations.com/images/apps/rounded/kavacrawl.png" width="40" alt="" /> | [**KavaCrawl**](https://kavacrawl.shapehaveninnovations.com/) | Discovery and Entertainment |
+| <img src="https://shapehaveninnovations.com/images/apps/rounded/mdnsshark.png" width="40" alt="" /> | [**mDNSShark**](https://mdnsshark.shapehaveninnovations.com/) | mDNS and Bonjour service discovery |
+| <img src="https://shapehaveninnovations.com/images/apps/rounded/rhythmx.png" width="40" alt="" /> | [**RhythmX**](https://rhythmx.shapehaveninnovations.com/) | Private cycle tracking for iPhone |
 
 ## Services
 
