@@ -1,4 +1,4 @@
-**Software research and solutions that put simplicity first.**
+**We chase good problems, then build iOS and web apps to solve them.**
 
 [Website](https://shapehaveninnovations.com) · [Blog](https://shapehaveninnovations.com/blog) · [Support](https://shapehaveninnovations.com/support) · [Email](mailto:info@shapehaveninnovations.com)
 
@@ -7,7 +7,7 @@
 We build iOS apps, websites and backends, modernize legacy code, and run our own products. You own your code, your data and your infrastructure.
 
 > [!NOTE]
-> Bugs and feature requests go in GitHub issues on the relevant repo. Everything else goes to [info@shapehaveninnovations.com](mailto:info@shapehaveninnovations.com).
+> Bugs and feature requests go in GitHub issues on the relevant repo. We welcome them!
 
 ## Products
 
